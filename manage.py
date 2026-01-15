@@ -5230,19 +5230,7 @@ async def add_warning_callback(client, cq):
     except Exception as e:
         await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
 
-# ================= UPDATE HELP COMMAND =================
-# Add this to your help_command function:
-"""
-🔔 **AUTO-REPORT SYSTEM:**
-• Mention `@admin` in any message
-• Bot automatically forwards to all admins
-• Use `/reports` to view pending reports
-• Use `/resolve [id]` to mark as resolved
-• Use `/reject [id]` to reject false reports
-"""
 
-# ================= ADD TO EXISTING CALLBACK HANDLERS =================
-# Add these new callback patterns to existing regex filters
 
 
 # ================= ADMIN RESPONSE TRACKING =================
@@ -5324,8 +5312,6 @@ def rate_limit(max_calls=30, period=1):
 
 # Use in handlers
 @app.on_message(filters.command("tagall") & filters.group)
-    """Tag all group members"""
-    
     # Check permission
     if not await can_user_restrict(client, message.chat.id, message.from_user.id):
         await message.reply_text(
