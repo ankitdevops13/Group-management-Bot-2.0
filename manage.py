@@ -5293,25 +5293,11 @@ async def admin_status_command(client, message: Message):
 
 
 # ================= TAG ALL MEMBERS =================
-# Decorator for rate limiting
-def rate_limit(max_calls=30, period=1):
-    def decorator(func):
-        calls = []
-        
-        async def wrapper(*args, **kwargs):
-            now = time.time()
-            calls[:] = [call for call in calls if call > now - period]
-            
-            if len(calls) >= max_calls:
-                await asyncio.sleep(period - (now - calls[0]))
-            
-            calls.append(time.time())
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-# Use in handlers
+# ================= TAG ALL MEMBERS =================
 @app.on_message(filters.command("tagall") & filters.group)
+async def tag_all_members(client, message: Message):
+    """Tag all group members"""
+    
     # Check permission
     if not await can_user_restrict(client, message.chat.id, message.from_user.id):
         await message.reply_text(
