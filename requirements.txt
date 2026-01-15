@@ -1,0 +1,8 @@
+pyrogram
+tgcrypto
+Flask
+gunicorn
+python-dotenv
+pytz
+aiohttp
+pillow
