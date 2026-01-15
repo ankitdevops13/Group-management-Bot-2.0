@@ -6,9 +6,20 @@ import os
 from datetime import datetime, timedelta, timezone
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
-from pyrogram.enums import ChatAction, ChatMemberStatus, ChatPrivileges
+from pyrogram.enums import ChatAction, ChatMemberStatus
 from pyrogram.errors import PeerIdInvalid
+from pyrogram.enums import ChatAction, ChatMemberStatus
 
+# Add ChatPrivileges conditionally
+try:
+    from pyrogram.enums import ChatPrivileges
+    CHAT_PRIVILEGES_AVAILABLE = True
+except ImportError:
+    # For older Pyrogram versions
+    from pyrogram.types import ChatPrivileges
+    CHAT_PRIVILEGES_AVAILABLE = True
+    print("⚠️ Using ChatPrivileges from pyrogram.types (older version)")
+    
 # ================= CONFIG =================
 API_ID = 32310443
 API_HASH = "c356e2c32fca6e1ad119d5ea7134ae88"
