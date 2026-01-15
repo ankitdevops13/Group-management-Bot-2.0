@@ -49,9 +49,7 @@ DB_FILE = "support.db"
 INITIAL_ADMINS = [
     6748792256,  # Super admin (you)
     6172401778,   # Admin 2
-    8235194860,  # Admin 3
-    3456789012,  # Admin 4
-    # Add more admin IDs here
+    8235194860,   # Admin 3
 ]
 
 # ================= BOT =================
@@ -294,8 +292,20 @@ def is_blocked(uid):
     return cur.fetchone() is not None
 
 async def can_user_restrict(client, chat_id, user_id):
-    """Check if user can restrict members (Pyrogram v2+ compatible)"""
+    """Check if user can restrict members - Fixed version"""
     try:
+        # Check if chat_id is actually a user ID (starts with check)
+        if isinstance(chat_id, (int, str)) and str(chat_id).isdigit():
+            chat_id_int = int(chat_id)
+            # User IDs are typically < group IDs, but better to check properly
+            # Skip check for user IDs to avoid "belongs to a user" error
+            if chat_id_int == user_id or chat_id_int < 0:
+                # This is a group/supergroup/channel (negative IDs)
+                pass
+            else:
+                # Might be a user ID, skip restrict check
+                return False
+        
         member = await client.get_chat_member(chat_id, user_id)
         
         # Owner can always restrict
@@ -313,7 +323,7 @@ async def can_user_restrict(client, chat_id, user_id):
         
         return False
     except Exception as e:
-        print(f"Restrict check error: {e}")
+        print(f"Restrict check error for chat {chat_id}, user {user_id}: {e}")
         return False
 
 async def can_bot_restrict(client, chat_id):
