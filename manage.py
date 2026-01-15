@@ -5017,6 +5017,9 @@ async def report_user_info_callback(client, cq):
         # Get user info
         user = await client.get_users(user_id)
         
+        # Get user bio first
+        user_bio = await get_user_bio(client, user_id)
+        
         # Get user warnings
         cur.execute(
             "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
@@ -5046,6 +5049,7 @@ async def report_user_info_callback(client, cq):
 • Warnings: {warn_count}/3
 • Reports: {report_count}
 • Status: {'Admin' if await is_group_admin(client, chat_id, user_id) else 'Member'}
+• Bio: {user_bio[:100] if user_bio else 'No bio'}
 
 **Actions:**
 • Use buttons below for quick actions
@@ -5074,6 +5078,17 @@ async def report_user_info_callback(client, cq):
         
     except Exception as e:
         await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+# Also check if you have this function, if not add it:
+async def is_group_admin(client, chat_id, user_id):
+    """Check if user is group admin"""
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except:
+        return False
+
 
 @app.on_callback_query(filters.regex("^report_user_warns:"))
 async def report_user_warns_callback(client, cq):
@@ -5407,6 +5422,7 @@ async def tag_all_members(client, message: Message):
 
 
 # ================= COMPLETE ID COMMAND =================
+# ================= COMPLETE ID COMMAND =================
 @app.on_message(filters.command(["id", "info", "whois"]) & (filters.group | filters.private))
 async def enhanced_id_command(client, message: Message):
     """Enhanced ID command with complete user/chat information"""
@@ -5443,6 +5459,9 @@ async def enhanced_id_command(client, message: Message):
         # Determine if we're in a group or private chat
         if message.chat.type == "private":
             # Private chat info
+            # Get user bio first
+            user_bio = await get_user_bio(client, user.id)
+            
             info_text = f"""
 {beautiful_header('info')}
 
@@ -5466,6 +5485,7 @@ async def enhanced_id_command(client, message: Message):
 • **Profile Photos:** {await get_profile_photos_count(client, user.id)}
 • **Last Online:** {await get_user_status(client, user.id)}
 • **Account Age:** {await get_account_age(user.id) if hasattr(user, 'date') else 'Unknown'}
+• **Bio:** {user_bio[:100] if user_bio else 'No bio'}
             """
             
         else:
@@ -5477,6 +5497,9 @@ async def enhanced_id_command(client, message: Message):
                 chat_member = await client.get_chat_member(chat.id, user_to_display.id)
             except:
                 pass
+            
+            # Get user bio first
+            user_bio = await get_user_bio(client, user_to_display.id)
             
             # Get role
             role = "👤 Member"
@@ -5541,7 +5564,7 @@ async def enhanced_id_command(client, message: Message):
 • **Warnings:** {warning_count}/3 {progress_bar((warning_count/3)*100, 5)}
 • **Reports:** {report_count}
 • **Message Activity:** {message_activity} actions
-• **Bio:** {await get_user_bio(client, user_to_display.id)[:100]}
+• **Bio:** {user_bio[:100] if user_bio else 'No bio'}
 
 💬 **CHAT INFO:**
 • **Chat:** {chat.title}
@@ -5609,6 +5632,7 @@ async def enhanced_id_command(client, message: Message):
             f"• Chat Type: {message.chat.type}"
             f"{beautiful_footer()}"
         )
+        
 
 # ================= HELPER FUNCTIONS FOR ID COMMAND =================
 
