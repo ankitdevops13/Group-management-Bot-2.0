@@ -239,6 +239,25 @@ def create_button_grid(buttons, columns=2):
         grid.append(row)
     return InlineKeyboardMarkup(grid)
 
+
+# Update get_uptime() function:
+def get_uptime() -> str:
+    """Get bot uptime as formatted string"""
+    try:
+        # Simple uptime calculation without psutil
+        import time
+        from datetime import datetime
+        
+        # Create a simple uptime counter
+        global START_TIME
+        if 'START_TIME' not in globals():
+            START_TIME = time.time()
+        
+        uptime_seconds = time.time() - START_TIME
+        uptime_str = str(timedelta(seconds=int(uptime_seconds)))
+        return uptime_str
+    except:
+        return "Unknown"
 # ================= HELPER FUNCTIONS =================
 def get_uptime() -> str:
     """Get bot uptime as formatted string"""
