@@ -418,26 +418,6 @@ def parse_duration(duration_str: str):
     except (ValueError, AttributeError):
         return None
 
-# ================= ABUSE =================
-ABUSE_WORDS = [
-    "fuck","shit","bitch","asshole",
-    "madarchod","behenchod","chutiya",
-    "gandu","bhosdike","lund","randi",
-    "harami","kamina"
-]
-
-def contains_abuse(text):
-    if not text:
-        return False
-    text = re.sub(r"[^a-zA-Z ]", "", text.lower())
-    return any(w in text for w in ABUSE_WORDS)
-
-def abuse_warning(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
-    conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
-    return cur.fetchone()[0]
 
 # ================= INLINE BUTTONS =================
 def admin_buttons(uid):
