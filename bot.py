@@ -419,6 +419,14 @@ def parse_duration(duration_str: str):
         return None
 
 
+def abuse_warning(uid):
+    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
+    cur.execute("UPDATE use_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    conn.commit()
+    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    return cur.fetchone()[0]
+
+
 # ================= INLINE BUTTONS =================
 def admin_buttons(uid):
     return create_button_grid([
