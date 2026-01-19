@@ -1195,16 +1195,1073 @@ async def back_to_start_callback(client, cq):
 # ================= ADDITIONAL CALLBACK HANDLERS =================
 @app.on_callback_query(filters.regex("^my_status$"))
 async def my_status_callback(client, cq):
-    """Show my status from callback"""
-    # Create a fake message
-    class FakeMessage:
-        def __init__(self):
-            self.chat = cq.message.chat
-            self.from_user = cq.from_user
+    """Show my status with detailed information for all user types"""
     
-    fake_msg = FakeMessage()
-    await my_status_command(client, fake_msg)
+    user = cq.from_user
+    chat = cq.message.chat
+    
+    # Get basic admin status
+    is_bot_admin_user = is_admin(user.id)
+    is_super_admin_user = (user.id == SUPER_ADMIN)
+    
+    # Different display for private vs group chats
+    if chat.type == "private":
+        await show_private_chat_status(client, cq, user, is_bot_admin_user, is_super_admin_user)
+    else:
+        await show_group_chat_status(client, cq, user, chat, is_bot_admin_user, is_super_admin_user)
+    
+    await cq.answer("Status loaded ✓")
+
+
+async def show_private_chat_status(client, cq, user, is_bot_admin, is_super_admin):
+    """Show status in private chat"""
+    
+    # Get support stats if available
+    cur.execute("SELECT COUNT(*) FROM contact_history WHERE user_id=?", (user.id,))
+    support_tickets = cur.fetchone()[0] or 0
+    
+    cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (user.id,))
+    is_blocked = cur.fetchone() is not None
+    
+    # Build status text
+    status_text = f"""
+{beautiful_header('info')}
+
+👤 **PRIVATE CHAT STATUS**
+
+📱 **YOUR INFORMATION:**
+• **Name:** {user.first_name} {user.last_name or ''}
+• **ID:** `{user.id}`
+• **Username:** @{user.username or 'None'}
+• **Premium:** {'✅ Yes' if getattr(user, 'is_premium', False) else '❌ No'}
+• **Bot:** {'🤖 Yes' if user.is_bot else '👤 Human'}
+
+🔑 **ADMIN STATUS:**
+"""
+    
+    if is_super_admin:
+        status_text += "• 👑 **Super Admin** (Full bot control)\n"
+        status_text += "• Can add/remove bot admins\n"
+        status_text += "• Access to all system commands\n"
+    elif is_bot_admin:
+        status_text += "• ⚡ **Bot Admin** (Special privileges)\n"
+        status_text += "• Can use bot admin commands\n"
+        status_text += "• Works in all groups\n"
+    else:
+        status_text += "• 👤 **Regular User** (No admin rights)\n"
+        status_text += "• Access to support system only\n"
+    
+    status_text += f"""
+📊 **YOUR STATS:**
+• Support Tickets: {support_tickets}
+• Blocked Status: {'🔴 Blocked' if is_blocked else '🟢 Active'}
+• Bot Admin: {'✅ Yes' if is_bot_admin else '❌ No'}
+
+💬 **AVAILABLE FEATURES:**
+"""
+    
+    if is_bot_admin or is_super_admin:
+        status_text += """
+• All bot admin commands
+• Group management tools
+• User moderation
+• System monitoring
+• Support ticket handling
+"""
+    else:
+        status_text += """
+• Support ticket system
+• Message bot admins
+• Report issues
+• Get help
+"""
+    
+    # Create buttons based on user type
+    buttons = []
+    
+    if is_super_admin:
+        buttons.append([
+            InlineKeyboardButton("👑 Super Admin", callback_data="super_admin_panel"),
+            InlineKeyboardButton("📋 Admin List", callback_data="list_admins")
+        ])
+    
+    if is_bot_admin or is_super_admin:
+        buttons.append([
+            InlineKeyboardButton("⚡ Admin Panel", callback_data="admin_panel"),
+            InlineKeyboardButton("📊 Bot Stats", callback_data="bot_stats")
+        ])
+    
+    buttons.extend([
+        [
+            InlineKeyboardButton("📖 Help", callback_data="help_main"),
+            InlineKeyboardButton("🚀 Features", callback_data="features_showcase")
+        ],
+        [
+            InlineKeyboardButton("💬 Support", callback_data="contact_support"),
+            InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")
+        ],
+        [
+            InlineKeyboardButton("🔄 Refresh", callback_data="my_status"),
+            InlineKeyboardButton("⬅️ Back", callback_data="back_to_start")
+        ]
+    ])
+    
+    await cq.message.edit_text(
+        status_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+async def show_group_chat_status(client, cq, user, chat, is_bot_admin, is_super_admin):
+    """Show status in group chat"""
+    
+    # Get group-specific information
+    try:
+        member = await client.get_chat_member(chat.id, user.id)
+        group_status = member.status
+        
+        if group_status == ChatMemberStatus.OWNER:
+            group_role = "👑 **Group Owner**"
+            role_icon = "👑"
+            can_restrict = True
+        elif group_status == ChatMemberStatus.ADMINISTRATOR:
+            group_role = "⚡ **Group Admin**"
+            role_icon = "⚡"
+            can_restrict = await can_user_restrict(client, chat.id, user.id)
+        elif group_status == ChatMemberStatus.MEMBER:
+            group_role = "👤 **Group Member**"
+            role_icon = "👤"
+            can_restrict = False
+        elif group_status == ChatMemberStatus.RESTRICTED:
+            group_role = "🔇 **Restricted User**"
+            role_icon = "🔇"
+            can_restrict = False
+        elif group_status == ChatMemberStatus.BANNED:
+            group_role = "🚫 **Banned User**"
+            role_icon = "🚫"
+            can_restrict = False
+        else:
+            group_role = f"❓ **{group_status}**"
+            role_icon = "❓"
+            can_restrict = False
+    except:
+        group_role = "❓ **Unknown**"
+        role_icon = "❓"
+        can_restrict = False
+    
+    # Check bot permissions
+    bot_is_admin = await can_bot_restrict(client, chat.id)
+    
+    # Get warning count
+    cur.execute(
+        "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
+        (chat.id, user.id)
+    )
+    warn_count = cur.fetchone()[0]
+    
+    # Get report count
+    cur.execute(
+        "SELECT COUNT(*) FROM user_reports WHERE reported_user_id=? AND chat_id=?",
+        (user.id, chat.id)
+    )
+    report_count = cur.fetchone()[0]
+    
+    # Get last seen in group (approximate)
+    cur.execute(
+        """
+        SELECT MAX(timestamp) FROM user_warnings 
+        WHERE chat_id=? AND user_id=?
+        UNION
+        SELECT MAX(timestamp) FROM user_reports 
+        WHERE chat_id=? AND reported_user_id=?
+        """,
+        (chat.id, user.id, chat.id, user.id)
+    )
+    last_activity = cur.fetchone()[0]
+    
+    # Build status text
+    status_text = f"""
+{beautiful_header('info')}
+
+{role_icon} **GROUP CHAT STATUS**
+
+🏷️ **CHAT INFORMATION:**
+• **Group:** {chat.title}
+• **Chat ID:** `{chat.id}`
+• **Type:** {chat.type.title()}
+• **Bot Admin:** {'✅ Yes' if bot_is_admin else '❌ No'}
+
+👤 **YOUR INFORMATION:**
+• **Name:** {user.first_name} {user.last_name or ''}
+• **ID:** `{user.id}`
+• **Username:** @{user.username or 'None'}
+• **Group Role:** {group_role}
+
+🔑 **ADMIN TYPES:**
+"""
+    
+    # Show all applicable admin types
+    admin_types = []
+    
+    if is_super_admin:
+        admin_types.append("👑 **Super Admin** (Full bot control)")
+    if is_bot_admin:
+        admin_types.append("⚡ **Bot Admin** (Special privileges)")
+    if can_restrict:
+        admin_types.append("🔧 **Group Admin** (Group permissions)")
+    
+    if admin_types:
+        status_text += "\n".join([f"• {t}" for t in admin_types])
+    else:
+        status_text += "• 👤 **Regular User** (No admin rights)"
+    
+    status_text += f"""
+
+📊 **YOUR STATS IN THIS GROUP:**
+• Warnings: {warn_count}/3 {progress_bar((warn_count/3)*100, 5)}
+• Reports: {report_count}
+• Last Activity: {last_activity[:16] if last_activity else 'Never'}
+• Can Restrict: {'✅ Yes' if can_restrict else '❌ No'}
+
+🔧 **AVAILABLE COMMANDS:**
+"""
+    
+    # Determine available commands
+    if is_super_admin:
+        status_text += """
+• **All commands** (Full access everywhere)
+• Bot admin commands (`/bmute`, `/bban`, etc.)
+• Group admin commands (`/mute`, `/ban`, etc.)
+• Super admin commands (`/addbotadmin`, etc.)
+"""
+    elif is_bot_admin:
+        status_text += """
+• **Bot admin commands** (Works without group admin)
+• `/bmute`, `/bban`, `/bwarn`, `/bpurge`
+• `/block`, `/unblock`, `/mybotadmin`
+• Works in all groups where bot is admin
+"""
+    elif can_restrict:
+        status_text += """
+• **Group admin commands**
+• `/mute`, `/ban`, `/warn`, `/kick`, `/purge`
+• `/lock`, `/unlock`, `/promote`, `/demote`
+• Requires group admin permissions
+"""
+    else:
+        status_text += """
+• **Public commands only**
+• `/start`, `/help`, `/rules`, `/admins`
+• `/id`, `/info`, `/mystatus`, `/warns`
+• `/abusestats`, `/tagall`, `/remind`
+"""
+    
+    # Add special notes
+    status_text += f"\n💡 **SPECIAL NOTES:**"
+    
+    if not bot_is_admin:
+        status_text += "\n• ⚠️ Bot needs admin rights for full functionality"
+    
+    if warn_count >= 2:
+        status_text += f"\n• ⚠️ You have {warn_count} warnings. Next may result in mute/ban"
+    
+    # Create buttons
+    buttons = []
+    
+    # Admin-specific buttons
+    if is_bot_admin or is_super_admin or can_restrict:
+        buttons.append([
+            InlineKeyboardButton("🔧 Mod Tools", callback_data="moderation_menu"),
+            InlineKeyboardButton("🔒 Lock Menu", callback_data="lock_menu")
+        ])
+    
+    # Information buttons
+    buttons.append([
+        InlineKeyboardButton("📊 Check Admin", callback_data=f"checkadmin:{user.id}"),
+        InlineKeyboardButton("⚠️ My Warnings", callback_data=f"view_warnings:{user.id}:{chat.id}")
+    ])
+    
+    # Utility buttons
+    buttons.append([
+        InlineKeyboardButton("📖 Help", callback_data="help_main"),
+        InlineKeyboardButton("💬 Chat Info", callback_data=f"chat_info:{chat.id}")
+    ])
+    
+    # Navigation buttons
+    buttons.append([
+        InlineKeyboardButton("🔄 Refresh", callback_data="my_status"),
+        InlineKeyboardButton("📊 Group Stats", callback_data=f"group_stats:{chat.id}")
+    ])
+    
+    # Bot admin panel for bot admins
+    if is_bot_admin or is_super_admin:
+        buttons.append([
+            InlineKeyboardButton("⚡ Bot Admin", callback_data="admin_panel"),
+            InlineKeyboardButton("📋 Admin List", callback_data="list_admins")
+        ])
+    
+    await cq.message.edit_text(
+        status_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+# ================= HELPER FUNCTION FOR PROGRESS BAR =================
+def progress_bar(percentage: int, length: int = 10) -> str:
+    """Create a visual progress bar"""
+    filled = "█" * int(percentage * length / 100)
+    empty = "░" * (length - len(filled))
+    return f"[{filled}{empty}] {percentage}%"
+
+
+# ================= ADDITIONAL CALLBACK HANDLERS =================
+
+@app.on_callback_query(filters.regex("^view_warnings:"))
+async def view_warnings_callback(client, cq):
+    """View user warnings"""
+    try:
+        parts = cq.data.split(":")
+        user_id = int(parts[1])
+        chat_id = int(parts[2])
+        
+        # Get warnings
+        cur.execute(
+            """
+            SELECT reason, timestamp 
+            FROM user_warnings 
+            WHERE chat_id=? AND user_id=?
+            ORDER BY timestamp DESC
+            LIMIT 10
+            """,
+            (chat_id, user_id)
+        )
+        warnings = cur.fetchall()
+        
+        if warnings:
+            warnings_text = "\n".join([
+                f"• **{i+1}.** {reason[:50]} ({timestamp[:16]})"
+                for i, (reason, timestamp) in enumerate(warnings)
+            ])
+            warn_msg = f"""
+{beautiful_header('moderation')}
+
+⚠️ **WARNING HISTORY**
+
+**Total Warnings:** {len(warnings)}/3
+{progress_bar((len(warnings)/3)*100, 5)}
+
+**Recent Warnings:**
+{warnings_text}
+            """
+        else:
+            warn_msg = f"""
+{beautiful_header('moderation')}
+
+✅ **NO WARNINGS**
+
+This user has no warnings in this group.
+Clean behavior record.
+            """
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📊 Abuse Stats", callback_data=f"abuse_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            warn_msg + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Warnings loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^chat_info:"))
+async def chat_info_callback(client, cq):
+    """Show chat information"""
+    try:
+        chat_id = int(cq.data.split(":")[1])
+        chat = await client.get_chat(chat_id)
+        
+        # Get member count
+        member_count = "Unknown"
+        if hasattr(chat, 'members_count'):
+            member_count = chat.members_count
+        
+        # Get chat admins count
+        admin_count = 0
+        try:
+            async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
+                if not member.user.is_bot:
+                    admin_count += 1
+        except:
+            pass
+        
+        info_text = f"""
+{beautiful_header('info')}
+
+💬 **CHAT INFORMATION**
+
+🏷️ **Basic Info:**
+• **Title:** {chat.title}
+• **ID:** `{chat.id}`
+• **Type:** {chat.type.title()}
+• **Members:** {member_count}
+• **Admins:** {admin_count}
+
+📝 **Description:**
+{chat.description or 'No description'}
+
+🔧 **Bot Status:**
+• Bot Admin: {'✅ Yes' if await can_bot_restrict(client, chat_id) else '❌ No'}
+• Bot Member: ✅ Yes
+• Can Delete: {'✅ Yes' if await can_bot_restrict(client, chat_id) else '❌ No'}
+
+📊 **Moderation Stats:**
+"""
+        
+        # Get moderation stats
+        cur.execute(
+            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=?",
+            (chat_id,)
+        )
+        total_warnings = cur.fetchone()[0]
+        
+        cur.execute(
+            "SELECT COUNT(*) FROM user_reports WHERE chat_id=? AND status='pending'",
+            (chat_id,)
+        )
+        pending_reports = cur.fetchone()[0]
+        
+        info_text += f"""
+• Total Warnings: {total_warnings}
+• Pending Reports: {pending_reports}
+• Active Users: {len([k for k in user_warnings_cache.keys() if f':{chat_id}:' in k])}
+"""
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📊 Group Stats", callback_data=f"group_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            info_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Chat info loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+# ================= CALLBACK HANDLERS FOR MY_STATUS =================
+
+# These callbacks are referenced in the buttons of my_status
+
+@app.on_callback_query(filters.regex("^super_admin_panel$"))
+async def super_admin_panel_callback(client, cq):
+    """Show super admin panel"""
+    if cq.from_user.id != SUPER_ADMIN:
+        await cq.answer("❌ Super admin only!", show_alert=True)
+        return
+    
+    admin_text = f"""
+{beautiful_header('admin')}
+
+👑 **SUPER ADMIN PANEL**
+
+⚡ **Full System Control:**
+• Add/remove bot admins
+• System backup & restore
+• Database management
+• Bot configuration
+
+🔧 **System Tools:**
+• Mass message deletion
+• Global user blocking
+• System health check
+• Log viewer
+
+📊 **Statistics:**
+• Total bot admins: {cur.execute("SELECT COUNT(*) FROM admins").fetchone()[0]}
+• Blocked users: {cur.execute("SELECT COUNT(*) FROM blocked_users").fetchone()[0]}
+• Database size: {os.path.getsize(DB_FILE) / 1024:.1f} KB
+"""
+    
+    buttons = [
+        [
+            InlineKeyboardButton("👥 Manage Admins", callback_data="manage_admins"),
+            InlineKeyboardButton("📋 List Admins", callback_data="list_admins")
+        ],
+        [
+            InlineKeyboardButton("💾 Backup DB", callback_data="backup_db"),
+            InlineKeyboardButton("🩺 Health Check", callback_data="health_check")
+        ],
+        [
+            InlineKeyboardButton("🗑️ Mass Delete", callback_data="mass_delete_menu"),
+            InlineKeyboardButton("📊 System Stats", callback_data="system_stats")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="admin_panel"),
+            InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")
+        ]
+    ]
+    
+    await cq.message.edit_text(
+        admin_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    
     await cq.answer()
+
+@app.on_callback_query(filters.regex("^list_admins$"))
+async def list_admins_callback(client, cq):
+    """List all bot admins"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("❌ Bot admins only!", show_alert=True)
+        return
+    
+    cur.execute("SELECT admin_id FROM admins ORDER BY admin_id")
+    admins = cur.fetchall()
+    
+    if not admins:
+        admin_list = "📭 **No Bot Admins Found**"
+    else:
+        admin_list = []
+        for (admin_id,) in admins:
+            try:
+                user = await client.get_users(admin_id)
+                if admin_id == SUPER_ADMIN:
+                    admin_list.append(f"👑 **Super Admin:** {user.mention} (`{admin_id}`)")
+                else:
+                    admin_list.append(f"⚡ **Admin:** {user.mention} (`{admin_id}`)")
+            except:
+                if admin_id == SUPER_ADMIN:
+                    admin_list.append(f"👑 **Super Admin:** `{admin_id}`")
+                else:
+                    admin_list.append(f"⚡ **Admin:** `{admin_id}`")
+        
+        admin_list = "\n".join(admin_list)
+    
+    admin_text = f"""
+{beautiful_header('admin')}
+
+👥 **BOT ADMINISTRATORS**
+
+{admin_list}
+
+📊 **Total:** {len(admins)} admins
+"""
+    
+    buttons = [
+        [InlineKeyboardButton("⬅️ Back", callback_data="admin_panel")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="list_admins")]
+    ]
+    
+    if cq.from_user.id == SUPER_ADMIN:
+        buttons.insert(0, [
+            InlineKeyboardButton("➕ Add Admin", callback_data="add_admin_menu"),
+            InlineKeyboardButton("➖ Remove Admin", callback_data="remove_admin_menu")
+        ])
+    
+    await cq.message.edit_text(
+        admin_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    
+    await cq.answer()
+
+@app.on_callback_query(filters.regex("^moderation_menu$"))
+async def moderation_menu_callback(client, cq):
+    """Show moderation menu"""
+    if not await can_user_restrict(client, cq.message.chat.id, cq.from_user.id) and not is_admin(cq.from_user.id):
+        await cq.answer("❌ Admin permission required!", show_alert=True)
+        return
+    
+    menu_text = f"""
+{beautiful_header('moderation')}
+
+🔧 **MODERATION TOOLS**
+
+👤 **User Management:**
+• Mute/Unmute users
+• Ban/Unban users  
+• Warn users
+• Kick users
+
+🗑️ **Message Management:**
+• Purge messages
+• Mass delete
+• Cleanup tools
+
+🔒 **Permission Control:**
+• Lock/unlock features
+• Set permissions
+• Auto-moderation
+
+📊 **Information:**
+• User information
+• Chat statistics
+• Warning history
+"""
+    
+    buttons = [
+        [
+            InlineKeyboardButton("🔇 Mute", callback_data="mute_menu"),
+            InlineKeyboardButton("🚫 Ban", callback_data="ban_menu")
+        ],
+        [
+            InlineKeyboardButton("⚠️ Warn", callback_data="warn_menu"),
+            InlineKeyboardButton("👢 Kick", callback_data="kick_menu")
+        ],
+        [
+            InlineKeyboardButton("🗑️ Purge", callback_data="purge_menu"),
+            InlineKeyboardButton("🔒 Lock", callback_data="lock_menu")
+        ],
+        [
+            InlineKeyboardButton("📊 Info", callback_data="info_menu"),
+            InlineKeyboardButton("📜 Rules", callback_data="rules_menu")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="my_status"),
+            InlineKeyboardButton("📖 Help", callback_data="help_main")
+        ]
+    ]
+    
+    await cq.message.edit_text(
+        menu_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    
+    await cq.answer()
+
+@app.on_callback_query(filters.regex("^lock_menu$"))
+async def lock_menu_callback(client, cq):
+    """Show lock menu"""
+    if not await can_user_restrict(client, cq.message.chat.id, cq.from_user.id) and not is_admin(cq.from_user.id):
+        await cq.answer("❌ Admin permission required!", show_alert=True)
+        return
+    
+    await lock_chat_permissions(client, cq.message)
+    await cq.answer()
+
+@app.on_callback_query(filters.regex("^checkadmin:"))
+async def checkadmin_callback(client, cq):
+    """Check admin status of user"""
+    try:
+        user_id = int(cq.data.split(":")[1])
+        chat_id = cq.message.chat.id
+        
+        # Get user info
+        user = await client.get_users(user_id)
+        
+        # Check admin status
+        is_bot_admin_user = is_admin(user_id)
+        is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
+        
+        status_text = f"""
+{beautiful_header('info')}
+
+🔍 **ADMIN STATUS CHECK**
+
+👤 **User:** {user.mention}
+🆔 **ID:** `{user_id}`
+
+📊 **Admin Types:**
+"""
+        
+        if user_id == SUPER_ADMIN:
+            status_text += "• 👑 **Super Admin** (Full bot control)\n"
+        elif is_bot_admin_user:
+            status_text += "• ⚡ **Bot Admin** (Special privileges)\n"
+        
+        if is_group_admin_user:
+            status_text += "• 🔧 **Group Admin** (Group permissions)\n"
+        
+        if not (user_id == SUPER_ADMIN or is_bot_admin_user or is_group_admin_user):
+            status_text += "• 👤 **Regular User** (No admin rights)\n"
+        
+        # Get group role
+        try:
+            member = await client.get_chat_member(chat_id, user_id)
+            if member.status == ChatMemberStatus.OWNER:
+                group_role = "👑 Group Owner"
+            elif member.status == ChatMemberStatus.ADMINISTRATOR:
+                group_role = "⚡ Group Admin"
+            elif member.status == ChatMemberStatus.MEMBER:
+                group_role = "👤 Group Member"
+            elif member.status == ChatMemberStatus.RESTRICTED:
+                group_role = "🔇 Restricted"
+            elif member.status == ChatMemberStatus.BANNED:
+                group_role = "🚫 Banned"
+            else:
+                group_role = str(member.status)
+        except:
+            group_role = "❓ Unknown"
+        
+        status_text += f"\n🏢 **Group Role:** {group_role}"
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📊 User Info", callback_data=f"userinfo:{user_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            status_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Admin status loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^view_warnings:"))
+async def view_warnings_callback(client, cq):
+    """View user warnings"""
+    try:
+        parts = cq.data.split(":")
+        user_id = int(parts[1])
+        chat_id = int(parts[2])
+        
+        # Get warnings
+        cur.execute(
+            """
+            SELECT reason, timestamp 
+            FROM user_warnings 
+            WHERE chat_id=? AND user_id=?
+            ORDER BY timestamp DESC
+            LIMIT 10
+            """,
+            (chat_id, user_id)
+        )
+        warnings = cur.fetchall()
+        
+        if warnings:
+            warnings_text = "\n".join([
+                f"• **{i+1}.** {reason[:50]}... ({timestamp[:16]})"
+                for i, (reason, timestamp) in enumerate(warnings)
+            ])
+            warn_msg = f"""
+{beautiful_header('moderation')}
+
+⚠️ **WARNING HISTORY**
+
+**Total Warnings:** {len(warnings)}/3
+{progress_bar((len(warnings)/3)*100, 5)}
+
+**Recent Warnings:**
+{warnings_text}
+            """
+        else:
+            warn_msg = f"""
+{beautiful_header('moderation')}
+
+✅ **NO WARNINGS**
+
+This user has no warnings in this group.
+Clean behavior record.
+            """
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📊 Abuse Stats", callback_data=f"abuse_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            warn_msg + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Warnings loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^chat_info:"))
+async def chat_info_callback(client, cq):
+    """Show chat information"""
+    try:
+        chat_id = int(cq.data.split(":")[1])
+        chat = await client.get_chat(chat_id)
+        
+        # Get member count
+        member_count = "Unknown"
+        if hasattr(chat, 'members_count'):
+            member_count = chat.members_count
+        
+        # Get chat admins count
+        admin_count = 0
+        try:
+            async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
+                if not member.user.is_bot:
+                    admin_count += 1
+        except:
+            pass
+        
+        info_text = f"""
+{beautiful_header('info')}
+
+💬 **CHAT INFORMATION**
+
+🏷️ **Basic Info:**
+• **Title:** {chat.title}
+• **ID:** `{chat.id}`
+• **Type:** {chat.type.title()}
+• **Members:** {member_count}
+• **Admins:** {admin_count}
+
+📝 **Description:**
+{chat.description[:200] + '...' if chat.description and len(chat.description) > 200 else chat.description or 'No description'}
+
+🔧 **Bot Status:**
+• Bot Admin: {'✅ Yes' if await can_bot_restrict(client, chat_id) else '❌ No'}
+• Bot Member: ✅ Yes
+• Can Delete: {'✅ Yes' if await can_bot_restrict(client, chat_id) else '❌ No'}
+"""
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📊 Group Stats", callback_data=f"group_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            info_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Chat info loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^group_stats:"))
+async def group_stats_callback(client, cq):
+    """Show group statistics"""
+    try:
+        chat_id = int(cq.data.split(":")[1])
+        
+        # Get group stats
+        cur.execute(
+            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=?",
+            (chat_id,)
+        )
+        total_warnings = cur.fetchone()[0]
+        
+        cur.execute(
+            "SELECT COUNT(*) FROM user_reports WHERE chat_id=?",
+            (chat_id,)
+        )
+        total_reports = cur.fetchone()[0]
+        
+        cur.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM user_warnings WHERE chat_id=?",
+            (chat_id,)
+        )
+        warned_users = cur.fetchone()[0]
+        
+        # Count users in cache
+        cached_users = len([k for k in user_warnings_cache.keys() if f':{chat_id}:' in k])
+        
+        stats_text = f"""
+{beautiful_header('info')}
+
+📊 **GROUP STATISTICS**
+
+📈 **Moderation Stats:**
+• Total Warnings: {total_warnings}
+• Total Reports: {total_reports}
+• Warned Users: {warned_users}
+• Active Tracking: {cached_users}
+
+⚡ **Activity:**
+• Last 24h Warnings: {cur.execute("SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND timestamp > datetime('now', '-1 day')", (chat_id,)).fetchone()[0]}
+• Pending Reports: {cur.execute("SELECT COUNT(*) FROM user_reports WHERE chat_id=? AND status='pending'", (chat_id,)).fetchone()[0]}
+• Resolved Reports: {cur.execute("SELECT COUNT(*) FROM user_reports WHERE chat_id=? AND status='resolved'", (chat_id,)).fetchone()[0]}
+
+🔧 **System:**
+• 3-Strike System: ✅ Active
+• Abuse Detection: ✅ Active
+• Auto-Moderation: ✅ Active
+"""
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data=f"chat_info:{chat_id}")],
+            [InlineKeyboardButton("📊 Abuse Stats", callback_data=f"abuse_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            stats_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Group stats loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^abuse_stats:"))
+async def abuse_stats_callback(client, cq):
+    """Show abuse statistics"""
+    try:
+        chat_id = int(cq.data.split(":")[1])
+        
+        # Get abuse stats
+        cur.execute(
+            """
+            SELECT COUNT(*) 
+            FROM user_warnings 
+            WHERE chat_id=? AND reason LIKE '%Auto-%'
+            """,
+            (chat_id,)
+        )
+        total_incidents = cur.fetchone()[0]
+        
+        cur.execute(
+            """
+            SELECT user_id, COUNT(*) as count
+            FROM user_warnings 
+            WHERE chat_id=? AND reason LIKE '%Auto-%'
+            GROUP BY user_id 
+            ORDER BY count DESC 
+            LIMIT 5
+            """,
+            (chat_id,)
+        )
+        top_abusers = cur.fetchall()
+        
+        stats_text = f"""
+{beautiful_header('moderation')}
+
+📊 **ABUSE STATISTICS**
+
+📈 **Overview:**
+• Total Abuse Incidents: {total_incidents}
+• Active Tracking: {len([k for k in user_warnings_cache.keys() if f':{chat_id}:' in k])}
+• System Status: ✅ ACTIVE
+
+👥 **TOP 5 ABUSERS:**
+"""
+        
+        if top_abusers:
+            for i, (user_id, count) in enumerate(top_abusers, 1):
+                try:
+                    user = await client.get_users(user_id)
+                    username = f"@{user.username}" if user.username else "No username"
+                    stats_text += f"{i}. {user.first_name} ({username}) - {count} incidents\n"
+                except:
+                    stats_text += f"{i}. User `{user_id}` - {count} incidents\n"
+        else:
+            stats_text += "✅ No abuse incidents recorded!\n"
+        
+        stats_text += f"""
+🔧 **System Info:**
+• Detection Methods: 6 types
+• Languages: English, Hindi
+• Words Database: {len(ABUSE_WORDS)} words
+• Auto-Moderation: ✅ ENABLED
+"""
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data=f"abuse_stats:{chat_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            stats_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("Abuse stats loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^userinfo:"))
+async def userinfo_callback(client, cq):
+    """Show user information"""
+    try:
+        user_id = int(cq.data.split(":")[1])
+        user = await client.get_users(user_id)
+        
+        info_text = f"""
+{beautiful_header('info')}
+
+👤 **USER INFORMATION**
+
+📱 **Basic Info:**
+• **Name:** {user.first_name or ''} {user.last_name or ''}
+• **ID:** `{user.id}`
+• **Username:** @{user.username or 'None'}
+• **Premium:** {'✅ Yes' if getattr(user, 'is_premium', False) else '❌ No'}
+• **Bot:** {'🤖 Yes' if user.is_bot else '👤 Human'}
+• **DC ID:** {user.dc_id if user.dc_id else 'Unknown'}
+
+📊 **Status:**
+{await get_user_status(client, user_id)}
+
+💬 **Bio:**
+{await get_user_bio(client, user_id) or 'No bio available'}
+
+📸 **Profile Photos:** {await get_profile_photos_count(client, user_id)}
+"""
+        
+        buttons = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="my_status")],
+            [InlineKeyboardButton("📋 Copy ID", callback_data=f"copyid:{user_id}")]
+        ]
+        
+        await cq.message.edit_text(
+            info_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        await cq.answer("User info loaded")
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+# ================= HELPER FUNCTIONS =================
+async def get_user_status(client, user_id: int) -> str:
+    """Get user's last seen status"""
+    try:
+        user = await client.get_users(user_id)
+        if hasattr(user, 'status'):
+            status = user.status
+            if status.value == "online":
+                return "🟢 **Online now**"
+            elif status.value == "recently":
+                return "🟡 **Recently online**"
+            elif status.value == "within_week":
+                return "🟡 **Within this week**"
+            elif status.value == "within_month":
+                return "🟡 **Within this month**"
+            elif status.value == "long_time_ago":
+                return "⚫ **Long time ago**"
+        return "⚪ **Unknown**"
+    except:
+        return "⚪ **Unknown**"
+
+async def get_user_bio(client, user_id: int) -> str:
+    """Get user's bio"""
+    try:
+        user = await client.get_users(user_id)
+        return user.bio or ""
+    except:
+        return ""
+
+async def get_profile_photos_count(client, user_id: int) -> str:
+    """Get profile photos count"""
+    try:
+        photos = await client.get_profile_photos_count(user_id)
+        return f"{photos} photo{'s' if photos != 1 else ''}"
+    except:
+        return "Unknown"
+
 
 @app.on_callback_query(filters.regex("^chat_info$"))
 async def chat_info_callback(client, cq):
@@ -4553,140 +5610,788 @@ async def abuse_ban_cb(client, cq):
 
 # ================= Group lock by Bot admin COMMAND =================
 group_locks = {}  
-
-
-from pyrogram.types import ChatPermissions
+# ================= BOT ADMIN LOCK SYSTEM =================
+# Store group locks with chat ID as key
+group_locks = {}
 
 LOCK_PERMISSIONS = {
     "all": ChatPermissions(
         can_send_messages=False,
         can_send_media_messages=False,
         can_send_other_messages=False,
-        can_add_web_page_previews=False
+        can_add_web_page_previews=False,
+        can_send_polls=False,
+        can_change_info=False,
+        can_invite_users=False,
+        can_pin_messages=False
     ),
     "text": ChatPermissions(
-        can_send_messages=False
+        can_send_messages=False,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
     ),
     "media": ChatPermissions(
-        can_send_media_messages=False
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=False,
+        can_add_web_page_previews=False,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
     ),
-    "link": ChatPermissions(
-        can_add_web_page_previews=False
+    "stickers": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=False,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
     ),
-    "poll": ChatPermissions(
-        can_send_polls=False
+    "polls": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=False,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
     ),
-    "sticker": ChatPermissions(
-        can_send_stickers=False
+    "invites": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=False,
+        can_pin_messages=True
+    ),
+    "pins": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=False
+    ),
+    "info": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=False,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "url": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=False,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "games": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=False,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "inline": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=False,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "voice": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "video": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "audio": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "documents": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "photos": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=False,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
+    ),
+    "forward": ChatPermissions(
+        can_send_messages=True,
+        can_send_media_messages=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_change_info=True,
+        can_invite_users=True,
+        can_pin_messages=True
     )
 }
 
+UNLOCK_PERMISSIONS = ChatPermissions(
+    can_send_messages=True,
+    can_send_media_messages=True,
+    can_send_other_messages=True,
+    can_add_web_page_previews=True,
+    can_send_polls=True,
+    can_change_info=True,
+    can_invite_users=True,
+    can_pin_messages=True
+)
 
-async def apply_group_lock(client, chat_id, lock_type, lock=True):
-    if lock:
-        perms = LOCK_PERMISSIONS.get(lock_type)
-    else:
-        perms = ChatPermissions(
-            can_send_messages=True,
-            can_send_media_messages=True,
-            can_send_other_messages=True,
-            can_add_web_page_previews=True,
-            can_send_polls=True,
-            can_send_stickers=True
+async def apply_group_lock_by_id(client, chat_id, lock_type="all", lock=True, duration=None):
+    """Apply lock to group using chat ID"""
+    try:
+        if lock:
+            perms = LOCK_PERMISSIONS.get(lock_type, LOCK_PERMISSIONS["all"])
+        else:
+            perms = UNLOCK_PERMISSIONS
+        
+        await client.set_chat_permissions(chat_id, perms)
+        
+        # Store lock info
+        if lock:
+            group_locks[chat_id] = {
+                "type": lock_type,
+                "applied_at": datetime.now(timezone.utc),
+                "duration": duration,
+                "expires": datetime.now(timezone.utc) + duration if duration else None
+            }
+            
+            # Schedule auto-unlock if duration specified
+            if duration:
+                asyncio.create_task(auto_unlock_by_id(client, chat_id, duration))
+        else:
+            # Remove from locks if unlocking
+            group_locks.pop(chat_id, None)
+        
+        return True
+    except Exception as e:
+        print(f"Error applying lock: {e}")
+        return False
+
+async def auto_unlock_by_id(client, chat_id, duration):
+    """Auto-unlock after duration"""
+    await asyncio.sleep(duration.total_seconds())
+    
+    try:
+        await apply_group_lock_by_id(client, chat_id, lock=False)
+        
+        # Send unlock notification
+        await client.send_message(
+            chat_id,
+            f"{beautiful_header('settings')}\n\n"
+            f"🔓 **AUTO UNLOCKED**\n\n"
+            f"⏰ Duration expired\n"
+            f"🤖 By: Bot Admin System\n\n"
+            f"All permissions have been restored."
+            f"{beautiful_footer()}"
         )
-    await client.set_chat_permissions(chat_id, perms)
+        
+    except Exception as e:
+        print(f"Error in auto-unlock: {e}")
 
-@app.on_message(filters.private & filters.command("lock"))
-async def bot_admin_lock(client, message):
-    if message.from_user.id not in INITIAL_ADMINS:
-        return await message.reply_text("❌ Bot admin only")
+def parse_time_duration(time_str):
+    """Parse time duration string to timedelta"""
+    try:
+        time_str = time_str.lower().strip()
+        
+        if time_str.endswith("m"):
+            minutes = int(time_str[:-1])
+            return timedelta(minutes=minutes)
+        elif time_str.endswith("h"):
+            hours = int(time_str[:-1])
+            return timedelta(hours=hours)
+        elif time_str.endswith("d"):
+            days = int(time_str[:-1])
+            return timedelta(days=days)
+        elif time_str.endswith("w"):
+            weeks = int(time_str[:-1])
+            return timedelta(weeks=weeks)
+        elif time_str.isdigit():
+            return timedelta(minutes=int(time_str))
+        else:
+            return None
+    except:
+        return None
 
-    # /lock <chat_id> <type> [time] [silent]
+# ================= BOT ADMIN LOCK COMMANDS =================
+@app.on_message(filters.private & filters.command(["block", "bblock"]))
+async def bot_admin_lock_command(client, message: Message):
+    """Bot admin lock command - works by chat ID"""
+    
+    # Check if user is bot admin
+    if not is_admin(message.from_user.id):
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Bot Admin Required**\n"
+            "Only bot admins can use this command."
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Check command format
     if len(message.command) < 3:
-        return await message.reply_text(
-            "`/lock <chat_id> <type> [10m|1h|1d] [silent]`\n\n"
-            "Types: all, text, media, link, poll, sticker"
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "🔒 **BOT ADMIN LOCK SYSTEM**\n\n"
+            "**Usage:** `/block <chat_id> <lock_type> [duration] [silent]`\n\n"
+            "**Examples:**\n"
+            "• `/block -100123456789 all` - Lock everything\n"
+            "• `/block -100123456789 text 1h` - Lock text for 1 hour\n"
+            "• `/block -100123456789 media 30m silent` - Lock media silently\n\n"
+            "**Lock Types (17 options):**\n"
+            "`all, text, media, stickers, polls, invites, pins, info, url, games, inline, voice, video, audio, documents, photos, forward`\n\n"
+            "**Durations:** m=minutes, h=hours, d=days, w=weeks\n"
+            "**Options:** silent (no announcement)"
+            f"{beautiful_footer()}"
         )
-
-    chat_id = int(message.command[1])
-    lock_type = message.command[2].lower()
-    duration = None
-    announce = True
-
-    if len(message.command) >= 4:
-        duration = parse_time(message.command[3])
-    if "silent" in message.command:
-        announce = False
-
-    await apply_group_lock(client, chat_id, lock_type, lock=True)
-
-    until = None
-    if duration:
-        until = datetime.now(timezone.utc) + duration
-
-    group_locks[chat_id] = {
-        "type": lock_type,
-        "until": until,
-        "announce": announce
-    }
-
-    if announce:
-        await client.send_message(
-            chat_id,
-            f"🔒 **Group Locked**\n\n"
-            f"🔐 Type: `{lock_type}`\n"
-            f"{f'⏱ Until: {until}' if until else ''}\n"
-            f"🤖 By: Bot Admin"
-        )
-
-    await message.reply_text("✅ Lock applied successfully")
-
-    if until:
-        asyncio.create_task(auto_unlock(client, chat_id))
-
-async def auto_unlock(client, chat_id):
-    data = group_locks.get(chat_id)
-    if not data or not data["until"]:
         return
+    
+    try:
+        # Parse arguments
+        chat_id = int(message.command[1])
+        lock_type = message.command[2].lower()
+        duration = None
+        silent = False
+        
+        # Parse duration if provided
+        if len(message.command) >= 4 and not message.command[3].lower() == "silent":
+            duration = parse_time_duration(message.command[3])
+        
+        # Check if silent mode
+        if "silent" in [arg.lower() for arg in message.command]:
+            silent = True
+        
+        # Validate lock type
+        if lock_type not in LOCK_PERMISSIONS:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Invalid lock type:** `{lock_type}`\n\n"
+                f"**Available types:**\n"
+                f"`all`, `text`, `media`, `stickers`, `polls`, `invites`, `pins`, `info`, `url`, `games`, `inline`, `voice`, `video`, `audio`, `documents`, `photos`, `forward`"
+                f"{beautiful_footer()}"
+            )
+            return
+        
+        # Get chat info
+        try:
+            chat = await client.get_chat(chat_id)
+            chat_title = chat.title
+            chat_type = chat.type
+        except:
+            chat_title = f"Chat ID: {chat_id}"
+            chat_type = "Unknown"
+        
+        # Check if bot is admin in target chat
+        bot_is_admin = await can_bot_restrict(client, chat_id)
+        if not bot_is_admin:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Bot Not Admin**\n\n"
+                f"I need admin permissions in that chat.\n"
+                f"Chat: {chat_title}\n"
+                f"ID: `{chat_id}`\n\n"
+                f"Please make me admin with 'Change Chat Info' permission."
+                f"{beautiful_footer()}"
+            )
+            return
+        
+        # Apply lock
+        success = await apply_group_lock_by_id(
+            client, chat_id, lock_type, lock=True, duration=duration
+        )
+        
+        if not success:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Failed to apply lock**\n\n"
+                f"Chat: {chat_title}\n"
+                f"ID: `{chat_id}`\n"
+                f"Error: Check bot permissions"
+                f"{beautiful_footer()}"
+            )
+            return
+        
+        # Send confirmation to bot admin
+        duration_text = f"for {duration}" if duration else "permanently"
+        silent_text = " (Silent)" if silent else ""
+        
+        admin_msg = f"""
+{beautiful_header('admin')}
 
-    await asyncio.sleep((data["until"] - datetime.now(timezone.utc)).total_seconds())
+✅ **LOCK APPLIED**{silent_text}
 
-    await apply_group_lock(client, chat_id, None, lock=False)
+🏷️ **Chat:** {chat_title}
+🆔 **Chat ID:** `{chat_id}`
+🔒 **Lock Type:** {lock_type}
+⏰ **Duration:** {duration_text or 'Permanent'}
+👨‍💼 **By:** {message.from_user.mention}
 
-    if data["announce"]:
-        await client.send_message(
-            chat_id,
-            "🔓 **Group Unlocked Automatically**\n🤖 By: Bot"
+⚡ **Status:** Successfully locked
+"""
+        
+        await message.reply_text(admin_msg + beautiful_footer())
+        
+        # Send announcement to group (if not silent)
+        if not silent:
+            try:
+                lock_icon = "🔒" if lock_type == "all" else "🔐"
+                duration_info = f"\n⏰ **Duration:** {duration}" if duration else ""
+                
+                group_msg = f"""
+{beautiful_header('settings')}
+
+{lock_icon} **GROUP LOCKED** (by Bot Admin)
+
+🔒 **Type:** {lock_type.title()} Lock
+{duration_info}
+🤖 **Action:** Bot Admin Command
+
+📋 **Permissions changed for all members.**
+⚠️ **Note:** This is a bot admin action.
+"""
+                
+                await client.send_message(chat_id, group_msg + beautiful_footer())
+            except Exception as e:
+                print(f"Error sending group announcement: {e}")
+        
+    except ValueError:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Invalid Chat ID**\n"
+            "Chat ID must be a number (e.g., -100123456789)"
+            f"{beautiful_footer()}"
+        )
+    except Exception as e:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            f"❌ **Error:** {str(e)[:100]}"
+            f"{beautiful_footer()}"
         )
 
-    group_locks.pop(chat_id, None)
 
-@app.on_message(filters.private & filters.command("unlock"))
-async def bot_admin_unlock(client, message):
-    if message.from_user.id not in INITIAL_ADMINS:
+@app.on_message(filters.private & filters.command(["unblock", "bunblock"]))
+async def bot_admin_unlock_command(client, message: Message):
+    """Bot admin unlock command - works by chat ID"""
+    
+    # Check if user is bot admin
+    if not is_admin(message.from_user.id):
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Bot Admin Required**"
+            f"{beautiful_footer()}"
+        )
         return
+    
+    # Check command format
+    if len(message.command) < 2:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "🔓 **BOT ADMIN UNLOCK SYSTEM**\n\n"
+            "**Usage:** `/unblock <chat_id> [silent]`\n\n"
+            "**Examples:**\n"
+            "• `/unblock -100123456789` - Unlock everything\n"
+            "• `/unblock -100123456789 silent` - Unlock silently\n\n"
+            "**Options:** silent (no announcement)"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    try:
+        # Parse arguments
+        chat_id = int(message.command[1])
+        silent = "silent" in [arg.lower() for arg in message.command]
+        
+        # Get chat info
+        try:
+            chat = await client.get_chat(chat_id)
+            chat_title = chat.title
+        except:
+            chat_title = f"Chat ID: {chat_id}"
+        
+        # Check current lock status
+        current_lock = group_locks.get(chat_id)
+        
+        # Apply unlock
+        success = await apply_group_lock_by_id(client, chat_id, lock=False)
+        
+        if not success:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Failed to unlock**\n\n"
+                f"Chat: {chat_title}\n"
+                f"ID: `{chat_id}`\n"
+                f"Error: Check bot permissions"
+                f"{beautiful_footer()}"
+            )
+            return
+        
+        # Send confirmation to bot admin
+        silent_text = " (Silent)" if silent else ""
+        
+        admin_msg = f"""
+{beautiful_header('admin')}
 
-    chat_id = int(message.command[1])
-    await apply_group_lock(client, chat_id, None, lock=False)
-    group_locks.pop(chat_id, None)
+✅ **UNLOCK APPLIED**{silent_text}
 
-    await client.send_message(chat_id, "🔓 **Group Unlocked**")
-    await message.reply_text("✅ Group unlocked")
+🏷️ **Chat:** {chat_title}
+🆔 **Chat ID:** `{chat_id}`
+🔓 **Previous Lock:** {current_lock['type'] if current_lock else 'None'}
+👨‍💼 **By:** {message.from_user.mention}
+
+⚡ **Status:** Successfully unlocked
+"""
+        
+        await message.reply_text(admin_msg + beautiful_footer())
+        
+        # Send announcement to group (if not silent)
+        if not silent:
+            try:
+                group_msg = f"""
+{beautiful_header('settings')}
+
+🔓 **GROUP UNLOCKED** (by Bot Admin)
+
+All permissions have been restored.
+🤖 **Action:** Bot Admin Command
+
+📋 **Members can now send messages normally.**
+"""
+                
+                await client.send_message(chat_id, group_msg + beautiful_footer())
+            except Exception as e:
+                print(f"Error sending group announcement: {e}")
+        
+    except ValueError:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Invalid Chat ID**"
+            f"{beautiful_footer()}"
+        )
+    except Exception as e:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            f"❌ **Error:** {str(e)[:100]}"
+            f"{beautiful_footer()}"
+        )
+
 
 @app.on_message(filters.private & filters.command("lockstatus"))
-async def lock_status(client, message):
-    chat_id = int(message.command[1])
-    data = group_locks.get(chat_id)
+async def bot_admin_lock_status_command(client, message: Message):
+    """Check lock status by chat ID"""
+    
+    # Check if user is bot admin
+    if not is_admin(message.from_user.id):
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Bot Admin Required**"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Check command format
+    if len(message.command) < 2:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "📊 **LOCK STATUS CHECK**\n\n"
+            "**Usage:** `/lockstatus <chat_id>`\n\n"
+            "**Example:** `/lockstatus -100123456789`"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    try:
+        chat_id = int(message.command[1])
+        
+        # Get chat info
+        try:
+            chat = await client.get_chat(chat_id)
+            chat_title = chat.title
+            chat_type = chat.type
+        except:
+            chat_title = f"Chat ID: {chat_id}"
+            chat_type = "Unknown"
+        
+        # Get current lock info
+        current_lock = group_locks.get(chat_id)
+        
+        # Get current permissions from Telegram
+        try:
+            chat_info = await client.get_chat(chat_id)
+            perms = chat_info.permissions
+            
+            # Check bot admin status
+            bot_is_admin = await can_bot_restrict(client, chat_id)
+        except:
+            perms = None
+            bot_is_admin = False
+        
+        # Build status message
+        status_msg = f"""
+{beautiful_header('admin')}
 
-    if not data:
-        return await message.reply_text("🔓 Group is unlocked")
+📊 **LOCK STATUS REPORT**
 
-    await message.reply_text(
-        f"🔒 **LOCK STATUS**\n\n"
-        f"Type: `{data['type']}`\n"
-        f"Until: `{data['until'] or 'Manual'}`"
-    )
+🏷️ **Chat:** {chat_title}
+🆔 **Chat ID:** `{chat_id}`
+👥 **Type:** {chat_type}
+🤖 **Bot Admin:** {'✅ Yes' if bot_is_admin else '❌ No'}
 
+"""
+        
+        if current_lock:
+            time_since = datetime.now(timezone.utc) - current_lock["applied_at"]
+            hours = int(time_since.total_seconds() // 3600)
+            minutes = int((time_since.total_seconds() % 3600) // 60)
+            
+            status_msg += f"""
+🔒 **CURRENT LOCK:**
+• Type: {current_lock['type']}
+• Applied: {current_lock['applied_at'].strftime('%Y-%m-%d %H:%M:%S UTC')}
+• Duration: {current_lock['duration'] or 'Permanent'}
+• Expires: {current_lock['expires'].strftime('%Y-%m-%d %H:%M:%S UTC') if current_lock['expires'] else 'Never'}
+• Active For: {hours}h {minutes}m
+"""
+        else:
+            status_msg += "🔓 **NO ACTIVE LOCK**\nChat is currently unlocked.\n"
+        
+        if perms:
+            status_msg += f"""
+📋 **CURRENT PERMISSIONS:**
+• Send Messages: {'✅' if perms.can_send_messages else '❌'}
+• Send Media: {'✅' if perms.can_send_media_messages else '❌'}
+• Send Other: {'✅' if perms.can_send_other_messages else '❌'}
+• Web Previews: {'✅' if perms.can_add_web_page_previews else '❌'}
+• Send Polls: {'✅' if perms.can_send_polls else '❌'}
+• Change Info: {'✅' if perms.can_change_info else '❌'}
+• Invite Users: {'✅' if perms.can_invite_users else '❌'}
+• Pin Messages: {'✅' if perms.can_pin_messages else '❌'}
+"""
+        
+        # Add quick action buttons
+        buttons = []
+        if current_lock:
+            buttons.append([
+                InlineKeyboardButton("🔓 Unlock", callback_data=f"bunlock:{chat_id}"),
+                InlineKeyboardButton("⏰ Extend", callback_data=f"bextend:{chat_id}")
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton("🔒 Lock All", callback_data=f"block:{chat_id}:all"),
+                InlineKeyboardButton("🔐 Lock Text", callback_data=f"block:{chat_id}:text")
+            ])
+        
+        buttons.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data=f"brefresh:{chat_id}"),
+            InlineKeyboardButton("📊 Chat Info", callback_data=f"bchatinfo:{chat_id}")
+        ])
+        
+        await message.reply_text(
+            status_msg + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
+        )
+        
+    except ValueError:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Invalid Chat ID**"
+            f"{beautiful_footer()}"
+        )
+    except Exception as e:
+        await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            f"❌ **Error:** {str(e)[:100]}"
+            f"{beautiful_footer()}"
+        )
+
+
+# ================= CALLBACK HANDLERS FOR BOT ADMIN LOCKS =================
+@app.on_callback_query(filters.regex("^block:"))
+async def bot_admin_lock_callback(client, cq):
+    """Quick lock from callback"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("❌ Bot admin only!", show_alert=True)
+        return
+    
+    try:
+        parts = cq.data.split(":")
+        chat_id = int(parts[1])
+        lock_type = parts[2] if len(parts) > 2 else "all"
+        
+        # Apply lock
+        success = await apply_group_lock_by_id(client, chat_id, lock_type, lock=True)
+        
+        if success:
+            await cq.answer(f"✅ Locked {lock_type} in chat", show_alert=True)
+            
+            # Update message
+            await cq.message.edit_text(
+                cq.message.text + f"\n\n✅ **LOCK APPLIED:** {lock_type}",
+                reply_markup=cq.message.reply_markup
+            )
+        else:
+            await cq.answer("❌ Failed to apply lock", show_alert=True)
+            
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^bunlock:"))
+async def bot_admin_unlock_callback(client, cq):
+    """Quick unlock from callback"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("❌ Bot admin only!", show_alert=True)
+        return
+    
+    try:
+        chat_id = int(cq.data.split(":")[1])
+        
+        # Apply unlock
+        success = await apply_group_lock_by_id(client, chat_id, lock=False)
+        
+        if success:
+            await cq.answer("✅ Chat unlocked", show_alert=True)
+            
+            # Update message
+            await cq.message.edit_text(
+                cq.message.text + "\n\n✅ **UNLOCK APPLIED**",
+                reply_markup=cq.message.reply_markup
+            )
+        else:
+            await cq.answer("❌ Failed to unlock", show_alert=True)
+            
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+# ================= BOT ADMIN LOCK HELP =================
+@app.on_message(filters.private & filters.command("lockhelp"))
+async def bot_admin_lock_help(client, message: Message):
+    """Show bot admin lock help"""
+    
+    if not is_admin(message.from_user.id):
+        await message.reply_text("❌ Bot admins only!")
+        return
+    
+    help_text = f"""
+{beautiful_header('admin')}
+
+🔒 **BOT ADMIN LOCK SYSTEM**
+
+⚡ **Commands (Private Chat Only):**
+• `/block <chat_id> <type> [duration] [silent]` - Lock group
+• `/unblock <chat_id> [silent]` - Unlock group  
+• `/lockstatus <chat_id>` - Check lock status
+
+🔐 **17 Lock Types:**
+• `all` - Lock everything
+• `text` - Text messages only
+• `media` - All media messages
+• `stickers` - Stickers & GIFs
+• `polls` - Polls
+• `invites` - Invite links
+• `pins` - Pin messages
+• `info` - Change chat info
+• `url` - URLs/links
+• `games` - Games
+• `inline` - Inline bots
+• `voice` - Voice messages
+• `video` - Video messages
+• `audio` - Audio messages
+• `documents` - Documents
+• `photos` - Photos only
+• `forward` - Forwarded messages
+
+⏰ **Durations:**
+• `30m` - 30 minutes
+• `2h` - 2 hours
+• `1d` - 1 day
+• `1w` - 1 week
+• (Empty = Permanent)
+
+🔕 **Options:**
+• `silent` - No announcement in group
+
+📋 **Requirements:**
+1. You must be bot admin
+2. Bot must be admin in target group
+3. Bot needs 'Change Chat Info' permission
+
+🎯 **Examples:**
+• `/block -100123456789 all 1h` - Lock everything for 1 hour
+• `/block -100123456789 text silent` - Lock text silently
+• `/unblock -100123456789` - Unlock everything
+• `/lockstatus -100123456789` - Check status
+
+⚡ **Features:**
+• Works without being group admin
+• Auto-unlock after duration
+• Silent mode available
+• Status tracking
+• Callback quick actions
+"""
+    
+    await message.reply_text(help_text + beautiful_footer())
 
 # ================= ABUSE CACHE VIEWER =================
 
