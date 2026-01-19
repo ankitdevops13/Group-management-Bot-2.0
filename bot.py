@@ -185,7 +185,7 @@ initialize_admins()
 user_warnings_cache = {}  # {chat_id: {user_id: [reasons]}}
 user_mutes = {}  # {chat_id: {user_id: unmute_time}}
 approved_users = {}  # {chat_id: [user_ids]}
-
+abuse_tracker = {}
 # ================= BEAUTIFUL UI COMPONENTS =================
 def beautiful_header(title: str) -> str:
     """Create beautiful header for messages"""
@@ -4304,6 +4304,85 @@ async def mass_delete_text_confirmation(client, message: Message):
 
 
 # ================= ENHANCED ABUSE WORDS LIST =================
+
+# ================= ENHANCED ABUSE WORDS LIST =================
+ABUSE_WORDS = [
+    # English abuse words
+    "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "pussy",
+    "whore", "slut", "motherfucker", "damn", "hell", "crap", "bullshit",
+    "nigger", "nigga", "faggot", "retard", "idiot", "moron", "stupid",
+    "fool", "dumb", "stupid", "dickhead", "arsehole", "cock", "wanker",
+    "twat", "slag", "skank", "hoe", "slutty", "bitchy", "fucking",
+    
+    # Hindi abuse words (common)
+    "madarchod", "behenchod", "chutiya", "gandu", "bhosdike", "lund", "randi",
+    "harami", "kamina", "kutta", "kutte", "kuttiya", "lauda", "lavde", "lode",
+    "chut", "gand", "bhenchod", "maderchod", "bosdike", "bosdi", "rand",
+    "choot", "gaand", "bhosdi", "bhosda", "chodu", "chod", "chudai", "chud",
+    "gandu", "gandoo", "gandwe", "gandfat", "gandmasti", "gandu", "gaand",
+    
+    # Romanized Hindi abuse (common variations)
+    "mc", "bc", "randi", "chutiye", "bkl", "bsdk", "bsdka", "lodu", "lavdu",
+    "madar", "behen", "chootiya", "chutiye", "gandu", "gandwe", "lund",
+    "land", "laund", "launda", "chut", "choot", "bhen", "maa", "maa ki",
+    
+    # Evasion attempts (common misspellings)
+    "fuk", "shyt", "bich", "asshle", "mdrchod", "bhenchd", "chtiya", "gndu",
+    "lundh", "rndi", "hrma", "kmina", "kuttaa", "kutti", "lawda", "lawde",
+    "lauda", "laude", "choot", "gaandu", "bhonsdi", "bhosdika", "choduu",
+    "fak", "shit", "bich", "ass", "mader", "behn", "chutia", "gando",
+    
+    # Number substitutions (common evasions)
+    "f0ck", "sh1t", "b1tch", "4ss", "@ss", "@ssh0le", "m0therfucker",
+    "n1gger", "f4gg0t", "r3tard", "1d10t", "m0r0n", "st00pid",
+    
+    # Character substitutions
+    "f*ck", "sh*t", "b*tch", "a**hole", "a$$hole", "f**k", "s**t",
+    "b****", "m*****f*****", "n*****", "f*****",
+    
+    # Additional abusive terms in context
+    "suck my", "eat my", "kill you", "kill yourself", "die", "death",
+    "hate you", "fuck off", "fuck you", "go to hell", "burn in hell",
+    "son of a", "your mom", "your mother", "your sister", "your father",
+]
+
+def build_abuse_regex(words, chunk_size=25):
+    regex_list = []
+    for i in range(0, len(words), chunk_size):
+        chunk = words[i:i + chunk_size]
+        pattern = r"|".join(re.escape(w) for w in chunk)
+        regex_list.append(re.compile(pattern, re.IGNORECASE))
+    return regex_list
+
+ABUSE_REGEX_LIST = build_abuse_regex(ABUSE_WORDS)
+
+
+# ================= ENHANCED ABUSE DETECTION =================
+
+def contains_abuse_enhanced(text: str) -> bool:
+    if not text:
+        return False
+
+    text = text.lower()
+    clean = re.sub(r"[^a-z0-9\s]", " ", text)
+
+    # 🔹 Check against all regex chunks
+    for rx in ABUSE_REGEX_LIST:
+        if rx.search(clean):
+            return True
+
+    # 🔹 spaced abuse (f u c k / m c / b c)
+    if re.search(r'f\s*u\s*c\s*k', clean):
+        return True
+    if re.search(r'\b(m\s*c|b\s*c)\b', clean):
+        return True
+
+    # 🔹 repeated chars (fuuuuck)
+    if re.search(r'f+u+c+k+', clean):
+        return True
+
+    return False
+
 @app.on_message(filters.group & (filters.text | filters.caption))
 async def auto_abuse_function(client, message: Message):
     user = message.from_user
@@ -4407,692 +4486,211 @@ async def auto_abuse_function(client, message: Message):
 ⚠️ Follow group rules.
 """
         + beautiful_footer()
-            )
-# ================= ENHANCED ABUSE WORDS LIST =================
-ABUSE_WORDS = [
-    # English abuse words
-    "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "pussy",
-    "whore", "slut", "motherfucker", "damn", "hell", "crap", "bullshit",
-    "nigger", "nigga", "faggot", "retard", "idiot", "moron", "stupid",
-    "fool", "dumb", "stupid", "dickhead", "arsehole", "cock", "wanker",
-    "twat", "slag", "skank", "hoe", "slutty", "bitchy", "fucking",
-    
-    # Hindi abuse words (common)
-    "madarchod", "behenchod", "chutiya", "gandu", "bhosdike", "lund", "randi",
-    "harami", "kamina", "kutta", "kutte", "kuttiya", "lauda", "lavde", "lode",
-    "chut", "gand", "bhenchod", "maderchod", "bosdike", "bosdi", "rand",
-    "choot", "gaand", "bhosdi", "bhosda", "chodu", "chod", "chudai", "chud",
-    "gandu", "gandoo", "gandwe", "gandfat", "gandmasti", "gandu", "gaand",
-    
-    # Romanized Hindi abuse (common variations)
-    "mc", "bc", "randi", "chutiye", "bkl", "bsdk", "bsdka", "lodu", "lavdu",
-    "madar", "behen", "chootiya", "chutiye", "gandu", "gandwe", "lund",
-    "land", "laund", "launda", "chut", "choot", "bhen", "maa", "maa ki",
-    
-    # Evasion attempts (common misspellings)
-    "fuk", "shyt", "bich", "asshle", "mdrchod", "bhenchd", "chtiya", "gndu",
-    "lundh", "rndi", "hrma", "kmina", "kuttaa", "kutti", "lawda", "lawde",
-    "lauda", "laude", "choot", "gaandu", "bhonsdi", "bhosdika", "choduu",
-    "fak", "shit", "bich", "ass", "mader", "behn", "chutia", "gando",
-    
-    # Number substitutions (common evasions)
-    "f0ck", "sh1t", "b1tch", "4ss", "@ss", "@ssh0le", "m0therfucker",
-    "n1gger", "f4gg0t", "r3tard", "1d10t", "m0r0n", "st00pid",
-    
-    # Character substitutions
-    "f*ck", "sh*t", "b*tch", "a**hole", "a$$hole", "f**k", "s**t",
-    "b****", "m*****f*****", "n*****", "f*****",
-    
-    # Additional abusive terms in context
-    "suck my", "eat my", "kill you", "kill yourself", "die", "death",
-    "hate you", "fuck off", "fuck you", "go to hell", "burn in hell",
-    "son of a", "your mom", "your mother", "your sister", "your father",
-]
-
-# ================= ENHANCED ABUSE DETECTION =================
-def contains_abuse_enhanced(text: str) -> tuple[bool, str, list[str]]:
-    """Enhanced abuse detection with evasion detection"""
-    if not text:
-        return False, "", []
-    
-    # Clean the text but preserve spaces
-    text_lower = text.lower()
-    
-    # Remove special characters for basic matching
-    cleaned_text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text_lower)
-    
-    found_words = []
-    detection_method = "none"
-    
-    # Method 1: Check for exact word matches
-    for word in ABUSE_WORDS:
-        pattern = r'\b' + re.escape(word) + r'\b'
-        if re.search(pattern, cleaned_text):
-            found_words.append(word)
-            detection_method = "exact"
-    
-    # Method 2: Check for spaced abuse (e.g., "f u c k")
-    spaced_patterns = [
-        r'f\s*u\s*c\s*k',
-        r's\s*h\s*i\s*t',
-        r'b\s*i\s*t\s*c\s*h',
-        r'a\s*s\s*s',
-        r'm\s*c',
-        r'b\s*c',
-    ]
-    
-    for pattern in spaced_patterns:
-        if re.search(pattern, cleaned_text):
-            found_words.append("spaced_abuse")
-            detection_method = "spaced"
-            break
-    
-    # Method 3: Check for number substitutions
-    number_patterns = [
-        r'f[0-9]+ck',
-        r'sh[0-9]+t',
-        r'b[0-9]+tch',
-        r'[0-9]+ss',
-        r'[0-9]+hole',
-    ]
-    
-    for pattern in number_patterns:
-        if re.search(pattern, cleaned_text):
-            found_words.append("number_substitution")
-            detection_method = "number_sub"
-            break
-    
-    # Method 4: Check for character repetition (e.g., "fuuuuck")
-    repetition_patterns = [
-        r'f+u+c+k+',
-        r's+h+i+t+',
-        r'b+i+t+c+h+',
-        r'a+s+s+',
-        r'm+a+d+a+r+c+h+o+d+',
-        r'b+e+h+e+n+c+h+o+d+',
-    ]
-    
-    for pattern in repetition_patterns:
-        if re.search(pattern, cleaned_text):
-            found_words.append("character_repetition")
-            detection_method = "repetition"
-            break
-    
-    # Method 5: Check for special character substitutions
-    special_patterns = [
-        r'f[!@#$%^&*]ck',
-        r'sh[!@#$%^&*]t',
-        r'b[!@#$%^&*]tch',
-        r'@ss',
-        r'@ssh[o0]le',
-        r'[!@#$%^&*]ss',
-        r'm[!@#$%^&*]therf[!@#$%^&*]cker',
-    ]
-    
-    for pattern in special_patterns:
-        if re.search(pattern, text_lower):
-            found_words.append("special_characters")
-            detection_method = "special_chars"
-            break
-    
-    # Method 6: Check for word combinations (common phrases)
-    abusive_phrases = [
-        r'suck my dick',
-        r'fuck you',
-        r'fuck off',
-        r'go to hell',
-        r'son of a bitch',
-        r'mother fucker',
-        r'your mom',
-        r'your mother',
-        r'kill yourself',
-        r'you bitch',
-        r'you asshole',
-        r'you idiot',
-        r'you moron',
-        r'you stupid',
-    ]
-    
-    for phrase in abusive_phrases:
-        if re.search(phrase, cleaned_text):
-            found_words.append(phrase.replace(' ', '_'))
-            detection_method = "phrase"
-            break
-    
-    if found_words:
-        return True, detection_method, found_words
-    
-    return False, "", []
-
-def get_abuse_severity(text: str, detection_method: str, found_words: list) -> int:
-    """Determine severity of abuse (0-10 scale)"""
-    severity = 0
-    
-    # Base severity from detection method
-    severity_map = {
-        "exact": 3,
-        "spaced": 2,
-        "number_sub": 2,
-        "repetition": 1,
-        "special_chars": 2,
-        "phrase": 3
-    }
-    
-    severity += severity_map.get(detection_method, 1)
-    
-    # Severity based on specific words found
-    severe_words = ["madarchod", "behenchod", "motherfucker", "nigger", "faggot", 
-                    "kill yourself", "die", "death", "suicide"]
-    for word in severe_words:
-        if any(word in w for w in found_words):
-            severity += 3
-    
-    medium_words = ["fuck", "bitch", "asshole", "chutiya", "gandu", "bhosdike", 
-                    "cunt", "whore", "slut", "bastard"]
-    for word in medium_words:
-        if any(word in w for w in found_words):
-            severity += 2
-    
-    mild_words = ["shit", "damn", "hell", "crap", "idiot", "stupid", "moron", 
-                  "dumb", "fool", "retard"]
-    for word in mild_words:
-        if any(word in w for w in found_words):
-            severity += 1
-    
-    # Cap at 10
-    return min(severity, 10)
-
-# ================= UPDATED AUTO MUTE ON ABUSE =================
-@app.on_message(filters.group & (filters.text | filters.caption))
-async def auto_mute_on_abuse(client, message: Message):
-    """Automatically mute users who use abusive language - UPDATED VERSION"""
-    
-    # Skip if message is from admin or bot
-    if await can_user_restrict(client, message.chat.id, message.from_user.id):
-        return
-    
-    # Get message text
-    if not message.text and not message.caption:
-        return
-    
-    text = message.text or message.caption
-    
-    # Check for abuse with enhanced detection
-    has_abuse, detection_method, found_words = contains_abuse_enhanced(text)
-    
-    if not has_abuse:
-        return
-    
-    # Get abuse severity
-    severity = get_abuse_severity(text, detection_method, found_words)
-    
-    # Track abuse count for user in this chat
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    abuse_key = f"abuse:{chat_id}:{user_id}"
-    
-    if abuse_key not in user_warnings_cache:
-        user_warnings_cache[abuse_key] = []
-    
-    # Add this abuse incident
-    user_warnings_cache[abuse_key].append({
-        "text": text[:200],
-        "severity": severity,
-        "method": detection_method,
-        "words": found_words,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    })
-    
-    # Keep only last 10 incidents
-    if len(user_warnings_cache[abuse_key]) > 10:
-        user_warnings_cache[abuse_key] = user_warnings_cache[abuse_key][-10:]
-    
-    # Calculate total abuse score (last 10 messages)
-    total_severity = sum(incident["severity"] for incident in user_warnings_cache[abuse_key])
-    abuse_count = len(user_warnings_cache[abuse_key])
-    
-    # Determine action based on severity and history
-    mute_duration = None
-    mute_reason = ""
-    action = ""
-    
-    # Decision matrix
-    if severity >= 8 or total_severity >= 15:
-        # Severe abuse or pattern of severe abuse
-        mute_duration = timedelta(days=7)
-        mute_reason = "Severe abusive language detected"
-        action = "🚫 **BANNED** (7 days)"
-    elif severity >= 6 or total_severity >= 10:
-        # Multiple medium offenses
-        mute_duration = timedelta(days=1)
-        mute_reason = "Repeated abusive language detected"
-        action = "🔇 **MUTED** (24h)"
-    elif severity >= 4 or total_severity >= 6:
-        # First medium offense
-        mute_duration = timedelta(hours=6)
-        mute_reason = "Abusive language detected"
-        action = "🔇 **MUTED** (6h)"
-    elif severity >= 2:
-        # Mild offense - warning only
-        mute_duration = None
-        mute_reason = "Inappropriate language detected"
-        action = "⚠️ **WARNING**"
-    else:
-        # Very mild - just delete message
-        mute_duration = None
-        mute_reason = "Mild inappropriate language"
-        action = "🗑️ **Message Deleted**"
-    
-    try:
-        # Send warning to user
-        warning_msg_text = f"""
-{beautiful_header('moderation')}
-
-🚫 **ABUSE DETECTED** [{detection_method.upper()}]
-
-👤 **User:** {message.from_user.mention}
-📊 **Severity:** {severity}/10
-📝 **Reason:** {mute_reason}
-🔍 **Found:** {', '.join(found_words[:3])}{'...' if len(found_words) > 3 else ''}
-📈 **History:** {abuse_count} incident(s), Total score: {total_severity}
-
-💬 **Message:**
-{text[:100]}{'...' if len(text) > 100 else ''}
-
-❌ Abusive language is not allowed in this group.
-"""
-        
-        if mute_duration:
-            warning_msg_text += f"\n⚠️ **Action:** {action}"
-        
-        warning_msg = await message.reply_text(warning_msg_text + beautiful_footer())
-        
-        # Delete the abusive message
-        try:
-            await message.delete()
-        except:
-            pass
-        
-        # Apply mute/ban if duration specified
-        if mute_duration:
-            try:
-                # Calculate unmute time
-                unmute_time = datetime.now(timezone.utc) + mute_duration
-                
-                if "BANNED" in action:
-                    # Ban for severe abuse
-                    await client.ban_chat_member(
-                        chat_id=message.chat.id,
-                        user_id=message.from_user.id,
-                        until_date=unmute_time
-                    )
-                    
-                    ban_message = f"""
-{beautiful_header('moderation')}
-
-🚫 **USER BANNED FOR ABUSE**
-
-👤 **User:** {message.from_user.mention}
-🆔 **ID:** `{message.from_user.id}`
-📊 **Severity:** {severity}/10
-📝 **Reason:** {mute_reason}
-🔍 **Detection:** {detection_method}
-🤖 **Action:** Auto-ban by bot
-
-💬 **Abusive Message:**
-{text[:200]}...
-
-⚠️ **Note:** User has been banned for {mute_duration.days} days for severe abusive language.
-                    """
-                    
-                    await message.chat.send_message(ban_message + beautiful_footer())
-                    
-                else:
-                    # Apply mute
-                    await client.restrict_chat_member(
-                        chat_id=message.chat.id,
-                        user_id=message.from_user.id,
-                        permissions=ChatPermissions(),
-                        until_date=unmute_time
-                    )
-                    
-                    # Store mute info for auto-unmute
-                    if message.chat.id not in user_mutes:
-                        user_mutes[message.chat.id] = {}
-                    
-                    user_mutes[chat_id][user_id] = unmute_time
-                    
-                    mute_message = f"""
-{beautiful_header('moderation')}
-
-🔇 **USER AUTO-MUTED**
-
-👤 **User:** {message.from_user.mention}
-🆔 **ID:** `{message.from_user.id}`
-⏰ **Duration:** {mute_duration}
-📊 **Severity:** {severity}/10
-📝 **Reason:** {mute_reason}
-🔍 **Found:** {', '.join(found_words[:3])}
-🤖 **Action:** Auto-mute by bot
-
-💬 **Abusive Message:**
-{text[:200]}...
-
-⚠️ **Note:** User will be unmuted automatically after {mute_duration}.
-                    """
-                    
-                    await message.chat.send_message(mute_message + beautiful_footer())
-                
-                # Add to warning database
-                cur.execute(
-                    "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-                    (message.chat.id, message.from_user.id, 
-                     f"Auto-warning: {mute_reason} | Severity: {severity} | Words: {', '.join(found_words[:5])}")
-                )
-                conn.commit()
-                
-                # Notify admins about auto-mute
-                await notify_admins_about_auto_mute(client, message, severity, mute_reason, 
-                                                    action, detection_method, found_words)
-                
-            except Exception as e:
-                print(f"Error applying auto-mute/ban: {e}")
-        
-        # Delete warning message after 10 seconds
-        await asyncio.sleep(10)
-        await warning_msg.delete()
-        
-    except Exception as e:
-        print(f"Error in auto-mute: {e}")
+    )
 
 # ================= UPDATED NOTIFY ADMINS =================
-async def notify_admins_about_auto_mute(client, message, severity, reason, action, 
-                                        detection_method, found_words):
-    """Notify admins about auto-mute action - UPDATED"""
-    
-    user = message.from_user
+async def notify_admins_in_group(client, message, action, count):
     chat = message.chat
-    text = message.text or message.caption or ""
-    
-    notification = f"""
+    user = message.from_user
+
+    text = f"""
 {beautiful_header('moderation')}
 
-🤖 **AUTO-MODERATION ACTION**
-
-{action}
+🚨 **AUTO MODERATION ALERT**
 
 👤 **User:** {user.mention}
-🆔 **User ID:** `{user.id}`
-💬 **Chat:** {chat.title}
-📊 **Severity:** {severity}/10
-🔍 **Detection Method:** {detection_method}
-📝 **Reason:** {reason}
-🕒 **Time:** {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}
+🆔 **ID:** `{user.id}`
+📊 **Abuse Count:** {count}
 
-💬 **Abusive Message:**
-{text[:300]}{'...' if len(text) > 300 else ''}
+⚡ **Action Taken:** {action}
 
-🔍 **Found Words:** {', '.join(found_words[:5])}{'...' if len(found_words) > 5 else ''}
-
-✅ **Action taken automatically by bot**
-    """
-    
-    # Create buttons
-    buttons = [
-        [
-            InlineKeyboardButton("👤 User Info", 
-               callback_data=f"report_user_info:{user.id}:{chat.id}"),
-            InlineKeyboardButton("📊 Warnings", 
-               callback_data=f"report_user_warns:{user.id}:{chat.id}")
-        ],
-        [
-            InlineKeyboardButton("🔓 Unmute" if "MUTED" in action else "✅ OK", 
-               callback_data=f"unmute_abuser:{user.id}:{chat.id}" if "MUTED" in action else "dismiss"),
-            InlineKeyboardButton("🚫 Perm Ban", 
-               callback_data=f"perm_ban:{user.id}:{chat.id}")
-        ],
-        [
-            InlineKeyboardButton("📈 Abuse Stats", 
-               callback_data=f"abuse_stats:{chat.id}"),
-            InlineKeyboardButton("🔧 Adjust Settings", 
-               callback_data="abuse_settings")
-        ]
-    ]
-    
-    # Send to all admins
+👮 **Admins please review**
+"""
     try:
-        async for member in client.get_chat_members(chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER] and not member.user.is_bot:
-                try:
-                    await client.send_message(
-                        member.user.id,
-                        notification + beautiful_footer(),
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                except:
-                    continue
-    except Exception as e:
-        print(f"Error notifying admins about auto-mute: {e}")
-
-# ================= ENHANCED ABUSE STATISTICS COMMAND =================
-@app.on_message(filters.command("abusestats") & filters.group)
-async def enhanced_abuse_stats_command(client, message: Message):
-    """Show enhanced abuse statistics for the group"""
-    
-    if not await can_user_restrict(client, message.chat.id, message.from_user.id):
-        await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n❌ **Permission Denied**" + beautiful_footer()
+        await client.send_message(
+            chat.id,
+            text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔓 Unmute",
+                            callback_data=f"abuse_unmute:{chat.id}:{user.id}"
+                        ),
+                        InlineKeyboardButton(
+                            "🚫 Ban",
+                            callback_data=f"abuse_ban:{chat.id}:{user.id}"
+                        )
+                    ]
+                ]
+            )
         )
-        return
-    
-    chat_id = message.chat.id
-    
-    # Get abuse warnings from database
-    cur.execute(
-        """
-        SELECT user_id, reason, COUNT(*) as abuse_count 
-        FROM user_warnings 
-        WHERE chat_id=? AND reason LIKE '%Auto-warning:%'
-        GROUP BY user_id 
-        ORDER BY abuse_count DESC 
-        LIMIT 10
-        """,
-        (chat_id,)
-    )
-    top_abusers = cur.fetchall()
-    
-    # Get total abuse incidents
-    cur.execute(
-        """
-        SELECT COUNT(*) 
-        FROM user_warnings 
-        WHERE chat_id=? AND reason LIKE '%Auto-warning:%'
-        """,
-        (chat_id,)
-    )
-    total_incidents = cur.fetchone()[0]
-    
-    # Get severity distribution
-    cur.execute(
-        """
-        SELECT reason, COUNT(*) 
-        FROM user_warnings 
-        WHERE chat_id=? AND reason LIKE '%Auto-warning:%'
-        GROUP BY reason 
-        HAVING reason LIKE '%Severity:%'
-        """,
-        (chat_id,)
-    )
-    severity_data = cur.fetchall()
-    
-    # Calculate current active cache
-    active_tracking = 0
-    for key in list(user_warnings_cache.keys()):
-        if key.startswith(f"abuse:{chat_id}:"):
-            active_tracking += 1
-    
-    # Build statistics
-    stats_text = f"""
-{beautiful_header('moderation')}
+    except:
+        pass
 
-📊 **ENHANCED ABUSE STATISTICS**
 
-📈 **Overview:**
-• Total Abuse Incidents: **{total_incidents}**
-• Users Currently Tracked: **{active_tracking}**
-• Abuse Detection: **✅ ACTIVE**
-• Auto-Moderation: **✅ ENABLED**
+@app.on_callback_query(filters.regex("^abuse_unmute:"))
+async def abuse_unmute_cb(client, cq):
+    _, chat_id, user_id = cq.data.split(":")
+    await client.restrict_chat_member(
+        int(chat_id),
+        int(user_id),
+        permissions=ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True
+        )
+    )
+    await cq.answer("User unmuted", show_alert=True)
 
-"""
-    
-    # Top abusers section
-    if top_abusers:
-        stats_text += "👥 **TOP 10 ABUSERS:**\n"
-        for i, (user_id, reason, count) in enumerate(top_abusers, 1):
-            try:
-                user = await client.get_users(user_id)
-                username = f"@{user.username}" if user.username else "No username"
-                # Extract severity from reason
-                severity_match = re.search(r'Severity: (\d+)', reason)
-                severity = severity_match.group(1) if severity_match else "?"
-                stats_text += f"{i}. **{user.first_name}** ({username}) - {count} incidents (Max severity: {severity}/10)\n"
-            except:
-                stats_text += f"{i}. User `{user_id}` - {count} incidents\n"
+
+@app.on_callback_query(filters.regex("^abuse_ban:"))
+async def abuse_ban_cb(client, cq):
+    _, chat_id, user_id = cq.data.split(":")
+    await client.ban_chat_member(int(chat_id), int(user_id))
+    await cq.answer("User banned", show_alert=True)
+
+# ================= Group lock by Bot admin COMMAND =================
+group_locks = {}  
+
+
+from pyrogram.types import ChatPermissions
+
+LOCK_PERMISSIONS = {
+    "all": ChatPermissions(
+        can_send_messages=False,
+        can_send_media_messages=False,
+        can_send_other_messages=False,
+        can_add_web_page_previews=False
+    ),
+    "text": ChatPermissions(
+        can_send_messages=False
+    ),
+    "media": ChatPermissions(
+        can_send_media_messages=False
+    ),
+    "link": ChatPermissions(
+        can_add_web_page_previews=False
+    ),
+    "poll": ChatPermissions(
+        can_send_polls=False
+    ),
+    "sticker": ChatPermissions(
+        can_send_stickers=False
+    )
+}
+
+
+async def apply_group_lock(client, chat_id, lock_type, lock=True):
+    if lock:
+        perms = LOCK_PERMISSIONS.get(lock_type)
     else:
-        stats_text += "✅ No abuse incidents recorded!\n"
-    
-    # Current cache status
-    stats_text += f"""
-    
-🔍 **CURRENT TRACKING:**
-• Active users in cache: {active_tracking}
-• Detection methods: Exact, Spaced, Number-sub, Repetition, Special-chars, Phrases
-• Languages: English, Hindi, Romanized Hindi
-• Total abuse words: {len(ABUSE_WORDS)}
-"""
-    
-    # Add abuse examples
-    stats_text += f"""
-    
-⚠️ **COMMONLY DETECTED ABUSE:**
-• Hindi: madarchod, behenchod, chutiya, gandu, bhosdike
-• English: fuck, shit, bitch, asshole, motherfucker
-• Evasions: f*ck, sh!t, @ss, f0ck, m0therfucker
-• Phrases: "fuck you", "kill yourself", "son of a bitch"
+        perms = ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+            can_send_polls=True,
+            can_send_stickers=True
+        )
+    await client.set_chat_permissions(chat_id, perms)
 
-🔧 **AUTO-MODERATION SETTINGS:**
-• Mild abuse: Message deleted + warning
-• Medium abuse: 6-hour mute
-• Severe abuse: 24-hour mute
-• Extreme abuse: 7-day ban
-• Pattern detection: 10-message history tracking
+@app.on_message(filters.private & filters.command("lock"))
+async def bot_admin_lock(client, message):
+    if message.from_user.id not in INITIAL_ADMINS:
+        return await message.reply_text("❌ Bot admin only")
 
-📊 **DETECTION METHODS:**
-1. Exact word matching
-2. Spaced abuse detection (f u c k)
-3. Number substitutions (f0ck, sh1t)
-4. Character repetition (fuuuuck)
-5. Special characters (@ss, f*ck)
-6. Abusive phrase detection
-"""
-    
-    # Add action buttons
-    buttons = [
-        [
-            InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_abuse_stats:{chat_id}"),
-            InlineKeyboardButton("📋 View Cache", callback_data=f"view_abuse_cache:{chat_id}")
-        ],
-        [
-            InlineKeyboardButton("⚙️ Settings", callback_data="abuse_settings"),
-            InlineKeyboardButton("📊 Detailed", callback_data=f"detailed_abuse_stats:{chat_id}")
-        ],
-        [
-            InlineKeyboardButton("❌ Clear Cache", callback_data=f"clear_abuse_cache:{chat_id}"),
-            InlineKeyboardButton("✅ Test Detection", callback_data="test_abuse_detection")
-        ]
-    ]
-    
+    # /lock <chat_id> <type> [time] [silent]
+    if len(message.command) < 3:
+        return await message.reply_text(
+            "`/lock <chat_id> <type> [10m|1h|1d] [silent]`\n\n"
+            "Types: all, text, media, link, poll, sticker"
+        )
+
+    chat_id = int(message.command[1])
+    lock_type = message.command[2].lower()
+    duration = None
+    announce = True
+
+    if len(message.command) >= 4:
+        duration = parse_time(message.command[3])
+    if "silent" in message.command:
+        announce = False
+
+    await apply_group_lock(client, chat_id, lock_type, lock=True)
+
+    until = None
+    if duration:
+        until = datetime.now(timezone.utc) + duration
+
+    group_locks[chat_id] = {
+        "type": lock_type,
+        "until": until,
+        "announce": announce
+    }
+
+    if announce:
+        await client.send_message(
+            chat_id,
+            f"🔒 **Group Locked**\n\n"
+            f"🔐 Type: `{lock_type}`\n"
+            f"{f'⏱ Until: {until}' if until else ''}\n"
+            f"🤖 By: Bot Admin"
+        )
+
+    await message.reply_text("✅ Lock applied successfully")
+
+    if until:
+        asyncio.create_task(auto_unlock(client, chat_id))
+
+async def auto_unlock(client, chat_id):
+    data = group_locks.get(chat_id)
+    if not data or not data["until"]:
+        return
+
+    await asyncio.sleep((data["until"] - datetime.now(timezone.utc)).total_seconds())
+
+    await apply_group_lock(client, chat_id, None, lock=False)
+
+    if data["announce"]:
+        await client.send_message(
+            chat_id,
+            "🔓 **Group Unlocked Automatically**\n🤖 By: Bot"
+        )
+
+    group_locks.pop(chat_id, None)
+
+@app.on_message(filters.private & filters.command("unlock"))
+async def bot_admin_unlock(client, message):
+    if message.from_user.id not in INITIAL_ADMINS:
+        return
+
+    chat_id = int(message.command[1])
+    await apply_group_lock(client, chat_id, None, lock=False)
+    group_locks.pop(chat_id, None)
+
+    await client.send_message(chat_id, "🔓 **Group Unlocked**")
+    await message.reply_text("✅ Group unlocked")
+
+@app.on_message(filters.private & filters.command("lockstatus"))
+async def lock_status(client, message):
+    chat_id = int(message.command[1])
+    data = group_locks.get(chat_id)
+
+    if not data:
+        return await message.reply_text("🔓 Group is unlocked")
+
     await message.reply_text(
-        stats_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
+        f"🔒 **LOCK STATUS**\n\n"
+        f"Type: `{data['type']}`\n"
+        f"Until: `{data['until'] or 'Manual'}`"
     )
+
 
 # ================= ABUSE CACHE VIEWER =================
-@app.on_callback_query(filters.regex("^view_abuse_cache:"))
-async def view_abuse_cache_callback(client, cq):
-    """View current abuse cache for chat"""
-    try:
-        chat_id = int(cq.data.split(":")[1])
-        
-        cache_data = []
-        for key in user_warnings_cache.keys():
-            if key.startswith(f"abuse:{chat_id}:"):
-                user_id = int(key.split(":")[2])
-                incidents = user_warnings_cache[key]
-                cache_data.append((user_id, len(incidents)))
-        
-        if cache_data:
-            cache_text = f"**Abuse Cache for Chat {chat_id}:**\n\n"
-            for user_id, count in cache_data[:20]:  # Show first 20
-                try:
-                    user = await client.get_users(user_id)
-                    cache_text += f"• {user.mention}: {count} incident(s)\n"
-                except:
-                    cache_text += f"• User {user_id}: {count} incident(s)\n"
-            
-            if len(cache_data) > 20:
-                cache_text += f"\n... and {len(cache_data) - 20} more users"
-        else:
-            cache_text = "No abuse cache data for this chat."
-        
-        await cq.message.edit_text(
-            f"{beautiful_header('moderation')}\n\n{cache_text}{beautiful_footer()}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Back", callback_data=f"refresh_abuse_stats:{chat_id}")]
-            ])
-        )
-        
-        await cq.answer("Cache loaded")
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
 
 # ================= TEST ABUSE DETECTION =================
-@app.on_callback_query(filters.regex("^test_abuse_detection$"))
-async def test_abuse_detection_callback(client, cq):
-    """Test abuse detection with sample text"""
-    
-    test_texts = [
-        "This is a test message with no abuse",
-        "You are an idiot!",
-        "What the fuck are you doing?",
-        "Madarchod sala!",
-        "f u c k you",
-        "sh!t happens",
-        "b1tch please",
-        "You're a motherfucker!",
-        "Nice try, chutiye",
-        "@sshole detected"
-    ]
-    
-    results = []
-    for text in test_texts:
-        has_abuse, method, words = contains_abuse_enhanced(text)
-        results.append(f"• `{text[:30]}...` → {'✅' if has_abuse else '❌'} {method} {words[:2]}")
-    
-    test_results = "\n".join(results)
-    
-    await cq.message.edit_text(
-        f"{beautiful_header('moderation')}\n\n"
-        f"🧪 **ABUSE DETECTION TEST**\n\n"
-        f"{test_results}\n\n"
-        f"✅ System is working correctly!"
-        f"{beautiful_footer()}",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Back", callback_data="back_to_stats")]
-        ])
-    )
-    
-    await cq.answer("Test completed")
 
 # ================= ADD TO YOUR START_BACKGROUND_TASKS =================
 # Add this function to your background tasks
