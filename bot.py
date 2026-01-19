@@ -4500,7 +4500,7 @@ def get_abuse_severity(text: str, detection_method: str, found_words: list) -> i
     return min(severity, 10)
 
 # ================= UPDATED AUTO MUTE ON ABUSE =================
-@app.on_message(filters.group & ~filters.service)
+@app.on_message(filters.group & (filters.text | filters.caption))
 async def auto_mute_on_abuse(client, message: Message):
     """Automatically mute users who use abusive language - UPDATED VERSION"""
     
