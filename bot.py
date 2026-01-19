@@ -4304,7 +4304,110 @@ async def mass_delete_text_confirmation(client, message: Message):
 
 
 # ================= ENHANCED ABUSE WORDS LIST =================
+@app.on_message(filters.group & (filters.text | filters.caption))
+async def auto_abuse_function(client, message: Message):
+    user = message.from_user
+    chat = message.chat
 
+    if not user or user.is_bot:
+        return
+
+    # Admin bypass
+    try:
+        member = await client.get_chat_member(chat.id, user.id)
+        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            return
+    except:
+        return
+
+    text = message.text or message.caption
+    if not contains_abuse_enhanced(text):
+        return
+
+    key = (chat.id, user.id)
+    count = abuse_tracker.get(key, 0) + 1
+    abuse_tracker[key] = count
+
+    # Delete abusive message
+    try:
+        await message.delete()
+    except:
+        pass
+
+    action = "⚠️ WARNING"
+    duration = None
+
+    # ================= LOGIC =================
+    if count == 2:
+        duration = timedelta(minutes=10)
+        action = "🔇 MUTED (10 minutes)"
+
+    elif count == 3:
+        duration = timedelta(hours=1)
+        action = "🔇 MUTED (1 hour)"
+
+    elif count >= 4:
+        try:
+            await client.ban_chat_member(chat.id, user.id)
+        except:
+            pass
+
+        await message.reply_text(
+            f"""
+{beautiful_header('moderation')}
+
+🚫 **USER AUTO-BANNED**
+
+👤 **User:** {user.mention}
+🆔 **User ID:** `{user.id}`
+📊 **Abuse Count:** {count}
+
+👨‍💼 **Action By:** Auto Moderation
+💬 **Chat:** {chat.title}
+
+⛔ Repeated abusive language detected.
+"""
+            + beautiful_footer()
+        )
+        return
+
+    # ================= APPLY MUTE =================
+    if duration:
+        try:
+            await client.restrict_chat_member(
+                chat.id,
+                user.id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
+                ),
+                until_date=datetime.now(timezone.utc) + duration
+            )
+        except:
+            pass
+
+    # ================= SAME WARN / MUTE UI =================
+    await message.reply_text(
+        f"""
+{beautiful_header('moderation')}
+
+🚨 **ABUSIVE LANGUAGE DETECTED**
+
+👤 **User:** {user.mention}
+🆔 **User ID:** `{user.id}`
+📊 **Warning Count:** {count}
+
+⚡ **Action Taken:** {action}
+
+👨‍💼 **Action By:** Auto Moderation
+💬 **Chat:** {chat.title}
+
+⚠️ Follow group rules.
+"""
+        + beautiful_footer()
+            )
 # ================= ENHANCED ABUSE WORDS LIST =================
 ABUSE_WORDS = [
     # English abuse words
