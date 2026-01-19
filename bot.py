@@ -6841,7 +6841,7 @@ async def user_handler(client, message: Message):
 
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
-    if abuse_text and contains_abuse(abuse_text):
+    if abuse_text and contains_abuse_enhanced(abuse_text):
         count = abuse_warning(uid)
 
         if count >= 2:
