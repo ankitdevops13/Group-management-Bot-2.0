@@ -8831,11 +8831,26 @@ Say hi and enjoy chatting with everyone!
 """
         await message.reply_text(member_welcome + beautiful_footer())
 
-def abuse_warning(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+def abuse_warning(chat_id, user_id):
+    # Ensure row exists
+    cur.execute(
+        "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
+        (chat_id, user_id)
+    )
+
+    # Increment warns
+    cur.execute(
+        "UPDATE abuse_warnings SET warns = warns + 1 WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+
     conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+
+    # Fetch updated warns
+    cur.execute(
+        "SELECT warns FROM abuse_warnings WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
     return cur.fetchone()[0]
 
 def contains_abuse(text):
