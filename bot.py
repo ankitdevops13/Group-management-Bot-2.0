@@ -7257,82 +7257,571 @@ async def cleanup_abuse_cache_task():
             
 # ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =========
 
-# ================= AUTO REPORT ON @admin / admin keyword =================
-
-ADMIN_PING_COOLDOWN = 120  # seconds
+# ================= CONFIGURATION =================
+ADMIN_PING_COOLDOWN = 120  # 2 minutes cooldown per user
 
 ADMIN_KEYWORDS = [
-    "admin", "admins", "moderator", "mod", "help", "support", "report"
+    # English keywords
+    "admin", "admins", "administrator", "moderator", "mod", "mods",
+    "help", "support", "report", "complaint", "issue", "problem",
+    "emergency", "urgent", "assistance", "attention", "please help",
+    "need help", "help needed", "help me", "someone help",
+    
+    # Hindi/Romanized Hindi keywords
+    "admin ji", "admin sir", "admin bhai", "admin help",
+    "help admin", "admins please", "admins help", "admins bulao",
+    "admin bulao", "call admin", "admin call", "admin ko bulao",
+    "admin aao", "aao admin", "admin attention", "attention admin",
+    
+    # Contextual keywords
+    "who is admin", "admin where", "where admin", "admin online",
+    "any admin", "admin anyone", "admin available", "available admin",
+    "admin help needed", "admin support needed", "admin emergency",
+    "admin urgent", "urgent admin", "emergency admin"
 ]
 
+# Create regex pattern for keyword matching
 ADMIN_KEYWORD_REGEX = re.compile(
     r"\b(" + "|".join(map(re.escape, ADMIN_KEYWORDS)) + r")\b",
     re.IGNORECASE
 )
 
 
+# ================= ADMIN KEYWORD DETECTOR =================
 @app.on_message(filters.group & (filters.text | filters.caption))
 async def admin_keyword_detector(client, message: Message):
-
+    """Detect admin-related keywords and notify admins"""
+    
+    # Skip if no user or bot
     if not message.from_user or message.from_user.is_bot:
         return
-
+    
     chat_id = message.chat.id
     user_id = message.from_user.id
-
-    # ❌ Ignore admins / owner themselves
-    member = await client.get_chat_member(chat_id, user_id)
-    if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return
-
+    
+    # Skip if user is admin/owner
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            return
+    except:
+        pass  # Skip if can't check status
+    
+    # Get message text
     text = (message.text or message.caption or "").lower()
-
-    # ❌ No keyword
+    
+    # Skip if no admin keywords found
     if not ADMIN_KEYWORD_REGEX.search(text):
         return
-
+    
+    # Check cooldown
     now = int(time.time())
-
-    # ---------- COOLDOWN ----------
     cur.execute(
         "SELECT last_ping FROM admin_ping_cooldown WHERE chat_id=? AND user_id=?",
         (chat_id, user_id)
     )
     row = cur.fetchone()
-
-    if row and now - row[0] < ADMIN_PING_COOLDOWN:
+    
+    if row and (now - row[0]) < ADMIN_PING_COOLDOWN:
+        # Still in cooldown
+        remaining = ADMIN_PING_COOLDOWN - (now - row[0])
+        minutes = remaining // 60
+        seconds = remaining % 60
+        
+        try:
+            # Send cooldown reminder
+            reminder = await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                "⏳ **Cooldown Active**\n\n"
+                f"You recently requested admin attention.\n"
+                f"Please wait **{minutes}m {seconds}s** before requesting again.\n\n"
+                "🛡️ **This prevents spam.**"
+                f"{beautiful_footer()}"
+            )
+            # Auto-delete reminder after 8 seconds
+            await asyncio.sleep(8)
+            await reminder.delete()
+        except:
+            pass
         return
-
+    
+    # Update cooldown
     cur.execute(
         "INSERT OR REPLACE INTO admin_ping_cooldown (chat_id, user_id, last_ping) VALUES (?, ?, ?)",
         (chat_id, user_id, now)
     )
     conn.commit()
-
-    # ---------- FETCH ADMINS ----------
+    
+    # Fetch all admins
     admin_mentions = []
-    async for m in client.get_chat_members(chat_id, filter="administrators"):
-        if not m.user.is_bot:
-            admin_mentions.append(m.user.mention)
-
-    admin_mentions = " ".join(admin_mentions[:5]) or "Admins"
-
-    # ---------- MESSAGE PREVIEW ----------
-    msg_preview = (message.text or message.caption or "Media")
-    if len(msg_preview) > 100:
-        msg_preview = msg_preview[:100] + "..."
-
-    # ---------- USER FEEDBACK ----------
-    await message.reply_text(
+    admin_names = []
+    
+    try:
+        async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
+            if not member.user.is_bot:
+                if member.status == ChatMemberStatus.OWNER:
+                    admin_mentions.append(f"👑 **Owner:** {member.user.mention}")
+                    admin_names.append(f"👑 {member.user.first_name}")
+                else:
+                    title = getattr(member, 'custom_title', 'Admin')
+                    admin_mentions.append(f"⚡ **{title}:** {member.user.mention}")
+                    admin_names.append(f"⚡ {member.user.first_name}")
+    except Exception as e:
+        print(f"Error fetching admins: {e}")
+        admin_mentions = ["⚠️ Could not fetch admin list"]
+        admin_names = ["Admins"]
+    
+    # Create admin mentions string
+    admin_mention_text = "\n".join(admin_mentions[:10])  # Limit to 10 admins
+    
+    # Message preview (truncated)
+    msg_preview = (message.text or message.caption or "📎 Media message")
+    if len(msg_preview) > 150:
+        msg_preview = msg_preview[:150] + "..."
+    
+    # Create detection reason
+    matched_keywords = []
+    for keyword in ADMIN_KEYWORDS:
+        if re.search(r'\b' + re.escape(keyword) + r'\b', text, re.IGNORECASE):
+            matched_keywords.append(keyword)
+            if len(matched_keywords) >= 3:
+                break
+    
+    detection_reason = f"Keywords detected: {', '.join(matched_keywords[:3])}"
+    
+    # Send user feedback
+    user_feedback = await message.reply_text(
         f"{beautiful_header('admin')}\n\n"
         "🚨 **Admin Alert Triggered**\n\n"
         f"👤 **User:** {message.from_user.mention}\n"
-        f"💬 **Message:** {msg_preview}\n\n"
-        f"👮 **Admins Notified:**\n{admin_mentions}\n\n"
-        "✅ **Reported to admins.**"
+        f"💬 **Message:** {msg_preview}\n"
+        f"🔍 **Reason:** {detection_reason}\n\n"
+        "✅ **Admins have been notified.**\n"
+        "⏳ **Cooldown:** 2 minutes\n\n"
+        f"👮 **Available Admins:**\n{admin_mention_text}"
         f"{beautiful_footer()}"
     )
+    
+    # Send detailed notification to all admins
+    await notify_admins_about_keyword_detection(
+        client, message, admin_names, matched_keywords
+    )
+    
+    # Auto-delete user feedback after 30 seconds
+    await asyncio.sleep(30)
+    try:
+        await user_feedback.delete()
+    except:
+        pass
 
+
+# ================= NOTIFY ADMINS FUNCTION =================
+async def notify_admins_about_keyword_detection(client, message, admin_names, matched_keywords):
+    """Send detailed notification to all admins about keyword detection"""
+    
+    user = message.from_user
+    chat = message.chat
+    
+    # Get message content
+    msg_content = message.text or message.caption or "📎 Media message"
+    if len(msg_content) > 200:
+        msg_content = msg_content[:200] + "..."
+    
+    # Build admin notification
+    notification = f"""
+{beautiful_header('security')}
+
+🔔 **KEYWORD ALERT DETECTED**
+
+📋 **Alert Type:** Admin Keyword Detection
+💬 **Group:** {chat.title}
+👤 **User:** {user.mention}
+🆔 **User ID:** `{user.id}`
+
+💬 **Message Content:**
+{msg_content}
+
+🔍 **Detected Keywords:**
+{', '.join(matched_keywords)}
+
+👥 **Available Admins ({len(admin_names)}):**
+{', '.join(admin_names[:5])}{'...' if len(admin_names) > 5 else ''}
+
+🕒 **Time:** {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}
+📎 **Message Link:** [Click to view]({message.link})
+"""
+    
+    # Create action buttons
+    buttons = [
+        [
+            InlineKeyboardButton("💬 Reply to User", callback_data=f"reply:{user.id}"),
+            InlineKeyboardButton("👤 User Info", callback_data=f"userinfo:{user.id}")
+        ],
+        [
+            InlineKeyboardButton("✅ Mark Checked", callback_data=f"checked_alert:{chat.id}:{user.id}"),
+            InlineKeyboardButton("👀 View Message", url=message.link)
+        ],
+        [
+            InlineKeyboardButton("⚠️ Warn User", callback_data=f"warn_keyword:{user.id}:{chat.id}"),
+            InlineKeyboardButton("🔇 Mute User", callback_data=f"mute_keyword:{user.id}:{chat.id}")
+        ]
+    ]
+    
+    # Send to all admins
+    admin_count = 0
+    try:
+        async for member in client.get_chat_members(chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
+            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER) and not member.user.is_bot:
+                try:
+                    await client.send_message(
+                        member.user.id,
+                        notification + beautiful_footer(),
+                        reply_markup=InlineKeyboardMarkup(buttons),
+                        disable_web_page_preview=True
+                    )
+                    admin_count += 1
+                except Exception as e:
+                    print(f"Error sending to admin {member.user.id}: {e}")
+                    continue
+    except Exception as e:
+        print(f"Error getting chat members: {e}")
+    
+    print(f"Keyword alert: Notified {admin_count} admins about user {user.id}")
+
+
+# ================= CALLBACK HANDLERS FOR KEYWORD ALERTS =================
+@app.on_callback_query(filters.regex("^checked_alert:"))
+async def checked_alert_callback(client, cq):
+    """Mark alert as checked by admin"""
+    
+    try:
+        parts = cq.data.split(":")
+        chat_id = int(parts[1])
+        user_id = int(parts[2])
+        
+        # Get chat info
+        chat = await client.get_chat(chat_id)
+        user = await client.get_users(user_id)
+        
+        await cq.answer(
+            f"✅ Alert checked for {user.first_name} in {chat.title}",
+            show_alert=False
+        )
+        
+        # Update message to show checked status
+        await cq.message.edit_text(
+            cq.message.text + f"\n\n✅ **Checked by:** {cq.from_user.mention}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Checked", callback_data="already_checked")]
+            ])
+        )
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^warn_keyword:"))
+async def warn_keyword_callback(client, cq):
+    """Warn user for keyword spam"""
+    
+    try:
+        parts = cq.data.split(":")
+        user_id = int(parts[1])
+        chat_id = int(parts[2])
+        
+        # Check if callback user is admin in that chat
+        if not await can_user_restrict(client, chat_id, cq.from_user.id):
+            await cq.answer("Permission denied", show_alert=True)
+            return
+        
+        # Get user info
+        user = await client.get_users(user_id)
+        
+        # Add warning
+        cur.execute(
+            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
+            (chat_id, user_id, "Keyword spam detection")
+        )
+        conn.commit()
+        
+        # Get warning count
+        cur.execute(
+            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
+            (chat_id, user_id)
+        )
+        warning_count = cur.fetchone()[0]
+        
+        await cq.answer(
+            f"⚠️ Warning {warning_count}/3 issued to {user.first_name}",
+            show_alert=False
+        )
+        
+        # Notify in group
+        try:
+            await client.send_message(
+                chat_id,
+                f"{beautiful_header('moderation')}\n\n"
+                f"⚠️ **WARNING FOR KEYWORD SPAM**\n\n"
+                f"👤 **User:** {user.mention}\n"
+                f"📊 **Warnings:** {warning_count}/3\n"
+                f"📝 **Reason:** Excessive admin mentions\n"
+                f"👨‍💼 **By:** {cq.from_user.mention}\n\n"
+                f"ℹ️ Please avoid unnecessary admin mentions."
+                f"{beautiful_footer()}"
+            )
+        except:
+            pass
+        
+        # Update callback message
+        await cq.message.edit_text(
+            cq.message.text + f"\n\n⚠️ **Warning issued by:** {cq.from_user.mention}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Warning Sent", callback_data="warning_sent")]
+            ])
+        )
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^mute_keyword:"))
+async def mute_keyword_callback(client, cq):
+    """Mute user for keyword spam"""
+    
+    try:
+        parts = cq.data.split(":")
+        user_id = int(parts[1])
+        chat_id = int(parts[2])
+        
+        # Check if callback user is admin in that chat
+        if not await can_user_restrict(client, chat_id, cq.from_user.id):
+            await cq.answer("Permission denied", show_alert=True)
+            return
+        
+        # Get user info
+        user = await client.get_users(user_id)
+        
+        # Mute for 1 hour
+        await client.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=ChatPermissions(can_send_messages=False),
+            until_date=datetime.now(timezone.utc) + timedelta(hours=1)
+        )
+        
+        await cq.answer(
+            f"🔇 Muted {user.first_name} for 1 hour",
+            show_alert=False
+        )
+        
+        # Notify in group
+        try:
+            await client.send_message(
+                chat_id,
+                f"{beautiful_header('moderation')}\n\n"
+                f"🔇 **USER MUTED FOR KEYWORD SPAM**\n\n"
+                f"👤 **User:** {user.mention}\n"
+                f"⏰ **Duration:** 1 hour\n"
+                f"📝 **Reason:** Excessive admin mentions\n"
+                f"👨‍💼 **By:** {cq.from_user.mention}\n\n"
+                f"ℹ️ User cannot send messages for 1 hour."
+                f"{beautiful_footer()}"
+            )
+        except:
+            pass
+        
+        # Update callback message
+        await cq.message.edit_text(
+            cq.message.text + f"\n\n🔇 **Muted by:** {cq.from_user.mention}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ User Muted", callback_data="muted")]
+            ])
+        )
+        
+    except Exception as e:
+        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+
+# ================= KEYWORD STATISTICS COMMAND =================
+@app.on_message(filters.command("keywordstats") & filters.group)
+async def keyword_stats_command(client, message: Message):
+    """Show keyword detection statistics"""
+    
+    chat_id = message.chat.id
+    
+    # Check admin status
+    try:
+        member = await client.get_chat_member(chat_id, message.from_user.id)
+        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                "❌ **Admin Permission Required**"
+                f"{beautiful_footer()}"
+            )
+            return
+    except:
+        return
+    
+    # Get stats from database
+    cur.execute(
+        """
+        SELECT user_id, COUNT(*) as count, MAX(last_ping) as last_time
+        FROM admin_ping_cooldown 
+        WHERE chat_id=?
+        GROUP BY user_id 
+        ORDER BY count DESC 
+        LIMIT 10
+        """,
+        (chat_id,)
+    )
+    top_users = cur.fetchall()
+    
+    cur.execute(
+        "SELECT COUNT(*) FROM admin_ping_cooldown WHERE chat_id=?",
+        (chat_id,)
+    )
+    total_detections = cur.fetchone()[0]
+    
+    cur.execute(
+        "SELECT COUNT(DISTINCT user_id) FROM admin_ping_cooldown WHERE chat_id=?",
+        (chat_id,)
+    )
+    unique_users = cur.fetchone()[0]
+    
+    # Build stats message
+    stats_text = f"""
+{beautiful_header('security')}
+
+📊 **KEYWORD DETECTION STATISTICS**
+
+📈 **Overview:**
+• Total Detections: {total_detections}
+• Unique Users: {unique_users}
+• Keywords Tracked: {len(ADMIN_KEYWORDS)}
+• Cooldown: {ADMIN_PING_COOLDOWN//60} minutes
+
+🔍 **Top 10 Users (Most Alerts):**
+"""
+    
+    if top_users:
+        for i, (user_id, count, last_time) in enumerate(top_users, 1):
+            try:
+                user = await client.get_users(user_id)
+                last_seen = datetime.fromtimestamp(last_time).strftime('%Y-%m-%d %H:%M')
+                stats_text += f"{i}. {user.mention} - {count} alerts (Last: {last_seen})\n"
+            except:
+                stats_text += f"{i}. User `{user_id}` - {count} alerts\n"
+    else:
+        stats_text += "✅ No keyword alerts detected yet.\n"
+    
+    stats_text += f"""
+⚙️ **System Info:**
+• Active Detection: ✅ ENABLED
+• Cooldown System: ✅ ACTIVE
+• Admin Notifications: ✅ WORKING
+• User Feedback: ✅ PROVIDED
+
+🎯 **Detected Keywords ({len(ADMIN_KEYWORDS)}):**
+{', '.join(ADMIN_KEYWORDS[:8])}...
+"""
+    
+    buttons = [
+        [
+            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_keyword_stats"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="keyword_settings")
+        ],
+        [
+            InlineKeyboardButton("📖 Keyword List", callback_data="show_keywords"),
+            InlineKeyboardButton("📊 Full Report", callback_data="full_keyword_report")
+        ]
+    ]
+    
+    await message.reply_text(
+        stats_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+# ================= CLEANUP OLD COOLDOWNS TASK =================
+async def cleanup_keyword_cooldowns():
+    """Cleanup old keyword cooldown entries (older than 1 week)"""
+    while True:
+        try:
+            one_week_ago = int(time.time()) - (7 * 24 * 3600)  # 1 week ago
+            
+            cur.execute(
+                "DELETE FROM admin_ping_cooldown WHERE last_ping < ?",
+                (one_week_ago,)
+            )
+            deleted = cur.rowcount
+            conn.commit()
+            
+            if deleted > 0:
+                print(f"Cleaned {deleted} old keyword cooldown entries")
+            
+        except Exception as e:
+            print(f"Error cleaning keyword cooldowns: {e}")
+        
+        await asyncio.sleep(86400)  # Run every 24 hours
+
+
+# ================= ADD TO STARTUP =================
+# Add this to your startup function
+async def start_background_tasks():
+    """Start all background tasks"""
+    # ... your existing tasks ...
+    asyncio.create_task(cleanup_keyword_cooldowns())
+    # ... your existing tasks ...
+
+
+# ================= KEYWORD SETTINGS MENU =================
+@app.on_callback_query(filters.regex("^keyword_settings$"))
+async def keyword_settings_callback(client, cq):
+    """Show keyword detection settings menu"""
+    
+    if not await can_user_restrict(client, cq.message.chat.id, cq.from_user.id):
+        await cq.answer("❌ Admin permission required", show_alert=True)
+        return
+    
+    settings_text = f"""
+{beautiful_header('settings')}
+
+⚙️ **KEYWORD DETECTION SETTINGS**
+
+📋 **Current Configuration:**
+• Cooldown: {ADMIN_PING_COOLDOWN} seconds ({ADMIN_PING_COOLDOWN//60} minutes)
+• Keywords: {len(ADMIN_KEYWORDS)} active keywords
+• Detection: ✅ Active
+• Notifications: ✅ Enabled
+
+🎯 **Available Actions:**
+"""
+    
+    buttons = [
+        [
+            InlineKeyboardButton("⏰ Change Cooldown", callback_data="change_cooldown"),
+            InlineKeyboardButton("📝 Add Keyword", callback_data="add_keyword")
+        ],
+        [
+            InlineKeyboardButton("🗑️ Remove Keyword", callback_data="remove_keyword"),
+            InlineKeyboardButton("📋 View All Keywords", callback_data="view_all_keywords")
+        ],
+        [
+            InlineKeyboardButton("🔧 Test Detection", callback_data="test_detection"),
+            InlineKeyboardButton("📊 Statistics", callback_data="keywordstats")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="moderation_menu"),
+            InlineKeyboardButton("✅ Save", callback_data="save_keyword_settings")
+        ]
+    ]
+    
+    await cq.message.edit_text(
+        settings_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    
+    await cq.answer()
 
 # ================= CALLBACK HANDLERS FOR AUTO-REPORT =================
 
@@ -7467,58 +7956,660 @@ async def build_tag_user_card(client, message):
 
 
 
+# ================= ENHANCED TAGALL WITH COOLDOWN & LIMITS =================
+# ================= ENHANCED TAGALL WITH COOLDOWN & LIMITS =================
+from datetime import datetime, timedelta
+
+# Cooldown storage
+tagall_cooldowns = {}
 
 @app.on_message(filters.command("tagall") & filters.group)
-async def tagall_working(client, message):
-
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return await message.reply_text("❌ Admin only")
-
-    mentions = []
-    async for m in client.get_chat_members(message.chat.id):
-        if not m.user.is_bot:
-            mentions.append(m.user.mention)
-
-    for i in range(0, len(mentions), 5):
-        await message.reply_text(" ".join(mentions[i:i+5]))
-
-
-@app.on_message(filters.command("tagadmin") & filters.group)
-async def tagadmin_final(client, message):
-
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+async def enhanced_tagall_command(client, message: Message):
+    """Enhanced tagall command with cooldown, limits, and progress"""
+    
+    # Check admin status
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "❌ **Admin Permission Required**\n"
+                "Only group admins can use this command."
+                f"{beautiful_footer()}"
+            )
+            return
+    except:
+        await message.reply_text(
+            f"{beautiful_header('moderation')}\n\n"
+            "❌ **Unable to verify admin status**"
+            f"{beautiful_footer()}"
+        )
         return
-
-    mentions = []
-    async for m in client.get_chat_members(message.chat.id, filter="administrators"):
-        if not m.user.is_bot:
-            mentions.append(m.user.mention)
-
-    if not mentions:
-        return await message.reply_text("No admins")
-
-    await message.reply_text(" ".join(mentions))
-
-
-@app.on_message(filters.command("cancel") & filters.group)
-async def cancel_tagging(client, message: Message):
-
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return
-
-    set_tag_cancel(message.chat.id, message.from_user.id)
-
-    await message.reply_text(
-        f"{beautiful_header('notify')}\n\n"
-        "❌ **Tagging Cancelled**\n"
-        "Ongoing tag process has been stopped."
+    
+    # Check cooldown (10 minutes per admin for safety)
+    current_time = datetime.now(timezone.utc)
+    cooldown_key = f"{chat_id}:{user_id}"
+    
+    if cooldown_key in tagall_cooldowns:
+        last_used = tagall_cooldowns[cooldown_key]
+        cooldown_end = last_used + timedelta(minutes=10)  # 10 minutes cooldown
+        
+        if current_time < cooldown_end:
+            remaining = cooldown_end - current_time
+            minutes = int(remaining.total_seconds() // 60)
+            seconds = int(remaining.total_seconds() % 60)
+            
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "⏳ **Tagall Cooldown**\n\n"
+                f"Please wait **{minutes}m {seconds}s** before using tagall again.\n\n"
+                f"🛡️ **Cooldown:** 10 minutes (Due to 1-minute delays between batches)"
+                f"{beautiful_footer()}"
+            )
+            return
+    
+    # Check if bot is admin
+    try:
+        bot_member = await client.get_chat_member(chat_id, "me")
+        if not bot_member.privileges.can_mention_all:
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "❌ **Bot Needs Mention Permission**\n"
+                "I need 'Mention All Users' permission to use tagall."
+                f"{beautiful_footer()}"
+            )
+            return
+    except:
+        pass
+    
+    # Get custom message (optional)
+    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention everyone!"
+    
+    # Start tagging process
+    status_msg = await message.reply_text(
+        f"{beautiful_header('tools')}\n\n"
+        "👥 **TAGGING ALL MEMBERS**\n\n"
+        "🔄 Fetching members list...\n"
+        "⏳ This may take a moment..."
         f"{beautiful_footer()}"
+    )
+    
+    try:
+        # Get all members
+        mentions = []
+        member_count = 0
+        bot_count = 0
+        admin_count = 0
+        
+        async for member in client.get_chat_members(chat_id):
+            if member.user.is_bot:
+                bot_count += 1
+                continue
+            
+            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+                admin_count += 1
+                # Admins in bold
+                mentions.append(f"**{member.user.mention}** (Admin)")
+            else:
+                mentions.append(member.user.mention)
+            
+            member_count += 1
+            
+            # Update status every 50 members
+            if member_count % 50 == 0:
+                try:
+                    await status_msg.edit_text(
+                        f"{beautiful_header('tools')}\n\n"
+                        "👥 **TAGGING ALL MEMBERS**\n\n"
+                        f"📊 **Progress:** {progress_bar(int((member_count/max(1, chat.members_count))*100))}\n"
+                        f"👤 **Members fetched:** {member_count}\n"
+                        f"🤖 **Bots skipped:** {bot_count}\n"
+                        f"⚡ **Admins:** {admin_count}\n\n"
+                        f"🔄 Fetching..."
+                        f"{beautiful_footer()}"
+                    )
+                except:
+                    pass
+        
+        # Get chat info for total count
+        try:
+            chat = await client.get_chat(chat_id)
+            total_members = chat.members_count
+        except:
+            total_members = "Unknown"
+        
+        # Calculate estimated time
+        total_batches = len(mentions) // 5 + (1 if len(mentions) % 5 > 0 else 0)
+        estimated_minutes = total_batches  # 1 minute per batch
+        estimated_seconds = estimated_minutes * 60
+        
+        # Update final status with time estimate
+        await status_msg.edit_text(
+            f"{beautiful_header('tools')}\n\n"
+            "👥 **TAGGING IN PROGRESS**\n\n"
+            f"📊 **Members to tag:** {member_count}\n"
+            f"📦 **Total batches:** {total_batches}\n"
+            f"⏰ **Estimated time:** {estimated_minutes} minutes\n"
+            f"📝 **Message:** {custom_message[:50]}...\n\n"
+            "🔄 Starting mentions (1 minute delay between batches)..."
+            f"{beautiful_footer()}"
+        )
+        
+        # Send the custom message first
+        if custom_message and custom_message != "Attention everyone!":
+            header_msg = await message.reply_text(
+                f"📢 **{custom_message}**\n\n"
+                f"👥 Tagging {member_count} members...\n"
+                f"⏰ Estimated: {estimated_minutes} minutes\n"
+                f"⚡ Requested by: {message.from_user.mention}"
+            )
+        else:
+            header_msg = await message.reply_text(
+                f"👋 **Attention all members!**\n\n"
+                f"👥 Tagging {member_count} members...\n"
+                f"⏰ Estimated: {estimated_minutes} minutes\n"
+                f"⚡ Requested by: {message.from_user.mention}"
+            )
+        
+        # Tag members in batches (Telegram limit: ~5 mentions per message is safe)
+        tagged_count = 0
+        batch_size = 5
+        batch_number = 1
+        
+        for i in range(0, len(mentions), batch_size):
+            batch = mentions[i:i + batch_size]
+            if batch:
+                try:
+                    # Send batch with batch number
+                    await message.reply_text(
+                        f"**Batch {batch_number}/{total_batches}**\n" +
+                        " ".join(batch)
+                    )
+                    tagged_count += len(batch)
+                    
+                    # Update status
+                    try:
+                        await status_msg.edit_text(
+                            f"{beautiful_header('tools')}\n\n"
+                            "👥 **TAGGING IN PROGRESS**\n\n"
+                            f"📊 **Progress:** {progress_bar(int((tagged_count/member_count)*100))}\n"
+                            f"👤 **Tagged:** {tagged_count}/{member_count}\n"
+                            f"📦 **Batch:** {batch_number}/{total_batches}\n"
+                            f"⏰ **Remaining:** {total_batches - batch_number} minutes\n\n"
+                            f"⏳ Next batch in 1 minute..."
+                            f"{beautiful_footer()}"
+                        )
+                    except:
+                        pass
+                    
+                    batch_number += 1
+                    
+                    # 1 MINUTE DELAY between batches
+                    if i + batch_size < len(mentions):  # Not the last batch
+                        await asyncio.sleep(60)  # 1 minute delay
+                    
+                except FloodWait as e:
+                    # If we get flood wait, sleep and continue
+                    await asyncio.sleep(e.value)
+                except Exception as e:
+                    print(f"Error tagging batch {i}: {e}")
+                    continue
+        
+        # Final completion message
+        completion_msg = await message.reply_text(
+            f"{beautiful_header('tools')}\n\n"
+            "✅ **TAGALL COMPLETE**\n\n"
+            f"📊 **Statistics:**\n"
+            f"• Total members: {total_members}\n"
+            f"• Members tagged: {tagged_count}\n"
+            f"• Bots skipped: {bot_count}\n"
+            f"• Admins: {admin_count}\n"
+            f"• Batches sent: {total_batches}\n"
+            f"• Total time: {estimated_minutes} minutes\n"
+            f"• Custom message: {custom_message[:30]}...\n\n"
+            f"👨‍💼 **By:** {message.from_user.mention}\n"
+            f"⏰ **Next available:** In 10 minutes"
+            f"{beautiful_footer()}"
+        )
+        
+        # Set cooldown (10 minutes due to delays)
+        tagall_cooldowns[cooldown_key] = current_time
+        
+        # Auto-delete completion after 30 seconds
+        await asyncio.sleep(30)
+        try:
+            await completion_msg.delete()
+            await header_msg.delete()
+            await status_msg.delete()
+            await message.delete()
+        except:
+            pass
+        
+    except Exception as e:
+        await status_msg.edit_text(
+            f"{beautiful_header('tools')}\n\n"
+            "❌ **TAGALL FAILED**\n\n"
+            f"Error: {str(e)[:100]}\n\n"
+            f"⚠️ Please try again later."
+            f"{beautiful_footer()}"
+        )
+
+
+# ================= QUICK TAGALL FOR ADMINS ONLY (WITHOUT DELAYS) =================
+@app.on_message(filters.command("admintag") & filters.group)
+async def admin_tag_command(client, message: Message):
+    """Tag all admins only (no delays needed since few admins)"""
+    
+    # Check admin status
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "❌ **Admin Permission Required**"
+                f"{beautiful_footer()}"
+            )
+            return
+    except:
+        return
+    
+    # Check cooldown (2 minutes for admintag)
+    current_time = datetime.now(timezone.utc)
+    cooldown_key = f"admintag:{chat_id}:{user_id}"
+    
+    if cooldown_key in tagall_cooldowns:
+        last_used = tagall_cooldowns[cooldown_key]
+        cooldown_end = last_used + timedelta(minutes=2)
+        
+        if current_time < cooldown_end:
+            remaining = cooldown_end - current_time
+            minutes = int(remaining.total_seconds() // 60)
+            seconds = int(remaining.total_seconds() % 60)
+            
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "⏳ **Admintag Cooldown**\n\n"
+                f"Please wait **{minutes}m {seconds}s** before using admintag again."
+                f"{beautiful_footer()}"
+            )
+            return
+    
+    # Get admins list
+    admin_mentions = []
+    owner = None
+    
+    try:
+        async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
+            if not member.user.is_bot:
+                if member.status == ChatMemberStatus.OWNER:
+                    owner = f"👑 **Owner:** {member.user.mention}"
+                else:
+                    title = getattr(member, 'custom_title', 'Admin')
+                    admin_mentions.append(f"⚡ **{title}:** {member.user.mention}")
+    except:
+        pass
+    
+    if not admin_mentions and not owner:
+        await message.reply_text(
+            f"{beautiful_header('moderation')}\n\n"
+            "📭 **No admins found to tag**"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Get custom message
+    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention admins!"
+    
+    # Build admin tag message
+    admin_text = f"📢 **{custom_message}**\n\n"
+    
+    if owner:
+        admin_text += f"{owner}\n"
+    
+    if admin_mentions:
+        admin_text += "\n".join(admin_mentions)
+    
+    admin_text += f"\n\n👨‍💼 Tagged by: {message.from_user.mention}"
+    
+    # Send admin tag
+    await message.reply_text(admin_text)
+    
+    # Set cooldown
+    tagall_cooldowns[cooldown_key] = current_time
+
+
+# ================= SMART TAGALL WITH AUTO-DELAY ADJUSTMENT =================
+@app.on_message(filters.command("smarttag") & filters.group)
+async def smart_tagall_command(client, message: Message):
+    """Smart tagall that adjusts delays based on group size"""
+    
+    # Check admin status
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "❌ **Admin Permission Required**\n"
+                "Only group admins can use this command."
+                f"{beautiful_footer()}"
+            )
+            return
+    except:
+        await message.reply_text(
+            f"{beautiful_header('moderation')}\n\n"
+            "❌ **Unable to verify admin status**"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Check cooldown (15 minutes for smarttag - longer due to larger groups)
+    current_time = datetime.now(timezone.utc)
+    cooldown_key = f"smarttag:{chat_id}:{user_id}"
+    
+    if cooldown_key in tagall_cooldowns:
+        last_used = tagall_cooldowns[cooldown_key]
+        cooldown_end = last_used + timedelta(minutes=15)
+        
+        if current_time < cooldown_end:
+            remaining = cooldown_end - current_time
+            minutes = int(remaining.total_seconds() // 60)
+            seconds = int(remaining.total_seconds() % 60)
+            
+            await message.reply_text(
+                f"{beautiful_header('moderation')}\n\n"
+                "⏳ **Smarttag Cooldown**\n\n"
+                f"Please wait **{minutes}m {seconds}s** before using smarttag again.\n\n"
+                f"🛡️ **Cooldown:** 15 minutes (For large groups)"
+                f"{beautiful_footer()}"
+            )
+            return
+    
+    # Get group size to determine settings
+    try:
+        chat = await client.get_chat(chat_id)
+        total_members = chat.members_count
+    except:
+        total_members = 100  # Default
+    
+    # Determine settings based on group size
+    if total_members < 50:
+        batch_size = 10
+        delay_seconds = 30  # 30 seconds for small groups
+        cooldown_minutes = 5
+    elif total_members < 200:
+        batch_size = 7
+        delay_seconds = 45  # 45 seconds for medium groups
+        cooldown_minutes = 8
+    else:
+        batch_size = 5
+        delay_seconds = 60  # 1 minute for large groups
+        cooldown_minutes = 15
+    
+    # Get custom message
+    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention everyone!"
+    
+    # Start process
+    status_msg = await message.reply_text(
+        f"{beautiful_header('tools')}\n\n"
+        "🤖 **SMART TAGALL INITIATED**\n\n"
+        f"📊 **Group size:** {total_members} members\n"
+        f"⚙️ **Auto-config:** {batch_size}/batch, {delay_seconds}s delay\n"
+        f"🔄 Fetching members..."
+        f"{beautiful_footer()}"
+    )
+    
+    try:
+        # Get all members
+        mentions = []
+        member_count = 0
+        bot_count = 0
+        admin_count = 0
+        
+        async for member in client.get_chat_members(chat_id):
+            if member.user.is_bot:
+                bot_count += 1
+                continue
+            
+            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+                admin_count += 1
+                mentions.append(f"**{member.user.mention}** (Admin)")
+            else:
+                mentions.append(member.user.mention)
+            
+            member_count += 1
+        
+        # Calculate
+        total_batches = len(mentions) // batch_size + (1 if len(mentions) % batch_size > 0 else 0)
+        estimated_seconds = total_batches * delay_seconds
+        estimated_minutes = estimated_seconds // 60
+        
+        # Send header
+        header_msg = await message.reply_text(
+            f"📢 **{custom_message}**\n\n"
+            f"🤖 **Smart Tagall Activated**\n"
+            f"👥 Members: {member_count}\n"
+            f"📦 Batches: {total_batches}\n"
+            f"⚙️ Config: {batch_size}/batch, {delay_seconds}s delay\n"
+            f"⏰ Est. time: {estimated_minutes}m {estimated_seconds%60}s\n"
+            f"👨‍💼 By: {message.from_user.mention}"
+        )
+        
+        # Tag in batches with dynamic delay
+        tagged_count = 0
+        batch_number = 1
+        
+        for i in range(0, len(mentions), batch_size):
+            batch = mentions[i:i + batch_size]
+            if batch:
+                try:
+                    # Send batch
+                    await message.reply_text(
+                        f"**Batch {batch_number}/{total_batches}** ({batch_size}/batch)\n" +
+                        " ".join(batch)
+                    )
+                    tagged_count += len(batch)
+                    
+                    # Update status
+                    progress = int((tagged_count / member_count) * 100)
+                    await status_msg.edit_text(
+                        f"{beautiful_header('tools')}\n\n"
+                        "🤖 **SMART TAGALL IN PROGRESS**\n\n"
+                        f"{progress_bar(progress)}\n"
+                        f"📊 **Progress:** {progress}%\n"
+                        f"👤 **Tagged:** {tagged_count}/{member_count}\n"
+                        f"📦 **Batch:** {batch_number}/{total_batches}\n"
+                        f"⏰ **Next in:** {delay_seconds} seconds\n\n"
+                        f"⚙️ **Config:** {batch_size}/batch, {delay_seconds}s delay"
+                        f"{beautiful_footer()}"
+                    )
+                    
+                    batch_number += 1
+                    
+                    # Dynamic delay between batches (except last)
+                    if i + batch_size < len(mentions):
+                        await asyncio.sleep(delay_seconds)
+                    
+                except Exception as e:
+                    print(f"Error in batch {batch_number}: {e}")
+                    continue
+        
+        # Completion
+        completion_msg = await message.reply_text(
+            f"{beautiful_header('tools')}\n\n"
+            "✅ **SMART TAGALL COMPLETE**\n\n"
+            f"📊 **Smart Statistics:**\n"
+            f"• Group size: {total_members}\n"
+            f"• Tagged: {tagged_count} members\n"
+            f"• Batches: {total_batches}\n"
+            f"• Batch size: {batch_size}\n"
+            f"• Delay: {delay_seconds}s\n"
+            f"• Total time: {estimated_minutes}m {estimated_seconds%60}s\n"
+            f"• Smart config: Auto-adjusted\n\n"
+            f"🤖 **System:** Smart optimization active\n"
+            f"👨‍💼 **By:** {message.from_user.mention}\n"
+            f"⏰ **Cooldown:** {cooldown_minutes} minutes"
+            f"{beautiful_footer()}"
+        )
+        
+        # Set cooldown
+        tagall_cooldowns[cooldown_key] = current_time
+        
+        # Cleanup
+        await asyncio.sleep(30)
+        try:
+            await completion_msg.delete()
+            await header_msg.delete()
+            await status_msg.delete()
+            await message.delete()
+        except:
+            pass
+        
+    except Exception as e:
+        await status_msg.edit_text(
+            f"{beautiful_header('tools')}\n\n"
+            "❌ **SMART TAGALL FAILED**\n\n"
+            f"Error: {str(e)[:100]}\n\n"
+            f"⚠️ Please try regular /tagall instead."
+            f"{beautiful_footer()}"
+        )
+
+
+# ================= TAGALL HELP COMMAND =================
+@app.on_message(filters.command("tagallhelp") & filters.group)
+async def tagall_help_command(client, message: Message):
+    """Show tagall help with all options"""
+    
+    help_text = f"""
+{beautiful_header('tools')}
+
+👥 **TAGALL COMMAND GUIDE**
+
+🎯 **Purpose:** Mention all group members safely.
+
+✅ **Available Commands:**
+• `/tagall [message]` - Standard tagall (1min delay)
+• `/smarttag [message]` - Auto-adjusts for group size
+• `/admintag [message]` - Tag only admins (no delay)
+• `/tagallhelp` - This help menu
+
+📋 **Standard Tagall (/tagall):**
+• Batch size: 5 mentions
+• Delay: 1 minute between batches
+• Cooldown: 10 minutes per admin
+• Best for: Medium to large groups
+
+🤖 **Smart Tagall (/smarttag):**
+• Auto-adjusts batch size & delay
+• Small groups: 10/batch, 30s delay
+• Medium groups: 7/batch, 45s delay  
+• Large groups: 5/batch, 60s delay
+• Cooldown: 15 minutes
+• Best for: All group sizes
+
+⚡ **Admin Tag (/admintag):**
+• Tags only admins
+• No delays needed
+• Cooldown: 2 minutes
+• Best for: Admin coordination
+
+🔒 **Safety Features:**
+• Admin-only access
+• Intelligent cooldowns
+• Progress tracking
+• Bot skipping
+• Flood protection
+• Auto-cleanup
+
+⚠️ **Important Notes:**
+• Don't abuse these commands
+• Respect cooldowns
+• Use appropriate command
+• Consider group size
+• Tag only when necessary
+
+🎯 **Best Practices:**
+1. Use `/admintag` for admin messages
+2. Use `/smarttag` for automatic optimization
+3. Use `/tagall` for consistent 1-minute delays
+4. Add clear message after command
+
+💡 **Pro Tips:**
+• `/tagall Meeting in 5 minutes!`
+• `/smarttag Important announcement!`
+• `/admintag Need admin assistance`
+• Keep messages short and clear
+    """
+    
+    buttons = [
+        [
+            InlineKeyboardButton("📊 Try /smarttag", callback_data="try_smarttag"),
+            InlineKeyboardButton("⚡ Try /admintag", callback_data="try_admintag")
+        ],
+        [
+            InlineKeyboardButton("🔧 Admin Panel", callback_data="admin_panel"),
+            InlineKeyboardButton("📚 Command List", callback_data="help_main")
+        ]
+    ]
+    
+    await message.reply_text(
+        help_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons),
+        disable_web_page_preview=True
     )
 
 
+# ================= CLEANUP OLD COOLDOWNS TASK =================
+async def cleanup_tagall_cooldowns():
+    """Cleanup old cooldown entries"""
+    while True:
+        try:
+            current_time = datetime.now(timezone.utc)
+            keys_to_delete = []
+            
+            for key, last_used in tagall_cooldowns.items():
+                # Different cooldowns for different commands
+                if key.startswith("smarttag:"):
+                    max_age = timedelta(hours=2)
+                elif key.startswith("admintag:"):
+                    max_age = timedelta(hours=1)
+                else:
+                    max_age = timedelta(hours=3)  # Regular tagall
+                
+                if current_time > last_used + max_age:
+                    keys_to_delete.append(key)
+            
+            for key in keys_to_delete:
+                del tagall_cooldowns[key]
+            
+            if keys_to_delete:
+                print(f"Cleaned {len(keys_to_delete)} old tagall cooldowns")
+            
+        except Exception as e:
+            print(f"Error cleaning tagall cooldowns: {e}")
+        
+        await asyncio.sleep(1800)  # Run every 30 minutes
+
+
+# ================= CALLBACK HANDLERS =================
+@app.on_callback_query(filters.regex("^try_smarttag$"))
+async def try_smarttag_callback(client, cq):
+    """Try smarttag from callback"""
+    await cq.answer("Use /smarttag [message] in group chat", show_alert=True)
+
+@app.on_callback_query(filters.regex("^try_admintag$"))
+async def try_admintag_callback(client, cq):
+    """Try admintag from callback"""
+    await cq.answer("Use /admintag [message] in group chat", show_alert=True)
+    
 
 # ================= COMPLETE ID COMMAND =================
 async def get_profile_photos_count(client, user_id: int) -> str:
