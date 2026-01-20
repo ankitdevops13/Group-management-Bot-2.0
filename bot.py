@@ -8929,7 +8929,6 @@ async def cb_reply(client, cq):
 @app.on_message(filters.private, group=1)
 async def user_handler(client, message: Message):
 
-    # Ignore bot messages
     if not message.from_user or message.from_user.is_bot:
         return
 
@@ -8942,10 +8941,9 @@ async def user_handler(client, message: Message):
     # ---------- BLOCK CHECK ----------
     if is_blocked(uid):
         await message.reply_text(
-            beautiful_footer(
-                "🔴 **Access Blocked**\n"
-                "Aap admin dwara block kiye gaye hain."
-            )
+            "🔴 **Access Blocked**\n"
+            "Aap admin dwara block kiye gaye hain."
+            + beautiful_footer()
         )
         return
 
@@ -8953,7 +8951,7 @@ async def user_handler(client, message: Message):
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
 
-        # ✅ FIXED CALL (chat_id + user_id)
+        # ✅ FIXED CALL
         count = abuse_warning(message.chat.id, uid)
 
         if count >= 2:
@@ -8964,22 +8962,18 @@ async def user_handler(client, message: Message):
             conn.commit()
 
             await message.reply_text(
-                beautiful_footer(
-                    "🔴 **Blocked**\n"
-                    "Repeated abusive language detected."
-                )
+                "🔴 **Blocked**\nRepeated abusive language detected."
+                + beautiful_footer()
             )
             return
         else:
             await message.reply_text(
-                beautiful_footer(
-                    "⚠️ **Warning**\n"
-                    "Abusive language detected. Please behave."
-                )
+                "⚠️ **Warning**\nAbusive language detected. Please behave."
+                + beautiful_footer()
             )
             return
 
-    # ---------- AUTO REPLY LOGIC ----------
+    # ---------- AUTO REPLY ----------
     cur.execute(
         "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
         (uid,)
@@ -8988,11 +8982,10 @@ async def user_handler(client, message: Message):
 
     if first_time:
         await message.reply_text(
-            beautiful_footer(
-                "📨 **Message Received!**\n"
-                "Thanks for contacting us ✨\n"
-                "Our **Ankit Shakya** will reply shortly ⏳"
-            )
+            "📨 **Message Received!**\n"
+            "Thanks for contacting us ✨\n"
+            "Our **Ankit Shakya** will reply shortly ⏳"
+            + beautiful_footer()
         )
         cur.execute(
             "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
@@ -9001,10 +8994,11 @@ async def user_handler(client, message: Message):
         conn.commit()
     else:
         await message.reply_text(
-            beautiful_footer("✅ **Message received**")
+            "✅ **Message received**"
+            + beautiful_footer()
         )
 
-    # ---------- FORWARD USER MESSAGE TO ADMINS ----------
+    # ---------- FORWARD TO ADMINS ----------
     cur.execute("SELECT admin_id FROM admins")
     admins = cur.fetchall()
 
@@ -9032,6 +9026,8 @@ async def user_handler(client, message: Message):
                 )
         except:
             continue
+
+
             
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
 
