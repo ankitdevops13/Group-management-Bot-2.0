@@ -82,7 +82,9 @@ CREATE TABLE IF NOT EXISTS contact_history (
 )
 """)
 cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS abuse_warnings (user_id INTEGER PRIMARY KEY, count INTEGER)")
+cur.execute(
+    "CREATE INDEX IF NOT EXISTS idx_abuse_warns ON abuse_warns(chat_id, user_id)"
+)
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
@@ -117,16 +119,7 @@ CREATE TABLE IF NOT EXISTS user_warnings (
 """)
 conn.commit()
 cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (SUPER_ADMIN,))
-# Abuse words database 
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS abuse_warns (
-    chat_id INTEGER,
-    user_id INTEGER,
-    warns INTEGER DEFAULT 0,
-    PRIMARY KEY (chat_id, user_id)
-)
-""")
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS mutes (
