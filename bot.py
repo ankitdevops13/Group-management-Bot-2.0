@@ -8832,26 +8832,21 @@ Say hi and enjoy chatting with everyone!
         await message.reply_text(member_welcome + beautiful_footer())
 
 def abuse_warning(chat_id, user_id):
-    # Ensure row exists
     cur.execute(
         "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
         (chat_id, user_id)
     )
-
-    # Increment warns
     cur.execute(
         "UPDATE abuse_warnings SET warns = warns + 1 WHERE chat_id=? AND user_id=?",
         (chat_id, user_id)
     )
-
     conn.commit()
-
-    # Fetch updated warns
     cur.execute(
         "SELECT warns FROM abuse_warnings WHERE chat_id=? AND user_id=?",
         (chat_id, user_id)
     )
     return cur.fetchone()[0]
+
 
 def contains_abuse(text):
     text = re.sub(r"[^a-zA-Z ]", "", text.lower())
@@ -8934,7 +8929,8 @@ async def cb_reply(client, cq):
 @app.on_message(filters.private, group=1)
 async def user_handler(client, message: Message):
 
-    if message.from_user.is_bot:
+    # Ignore bot messages
+    if not message.from_user or message.from_user.is_bot:
         return
 
     uid = message.from_user.id
@@ -8946,38 +8942,51 @@ async def user_handler(client, message: Message):
     # ---------- BLOCK CHECK ----------
     if is_blocked(uid):
         await message.reply_text(
-            footer("🔴 **Access Blocked**\nAap admin dwara block kiye gaye hain.")
+            beautiful_footer(
+                "🔴 **Access Blocked**\n"
+                "Aap admin dwara block kiye gaye hain."
+            )
         )
         return
 
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warning(uid)
+
+        # ✅ FIXED CALL (chat_id + user_id)
+        count = abuse_warning(message.chat.id, uid)
 
         if count >= 2:
             cur.execute(
-                "INSERT OR IGNORE INTO blocked_users VALUES (?)",
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
                 (uid,)
             )
             conn.commit()
 
             await message.reply_text(
-                beautiful_footer("🔴 **Blocked**\nRepeated abusive language detected.")
+                beautiful_footer(
+                    "🔴 **Blocked**\n"
+                    "Repeated abusive language detected."
+                )
             )
             return
         else:
             await message.reply_text(
-                beautiful_footer("⚠️ **Warning**\nAbusive language detected. Please behave.")
+                beautiful_footer(
+                    "⚠️ **Warning**\n"
+                    "Abusive language detected. Please behave."
+                )
             )
             return
 
     # ---------- AUTO REPLY LOGIC ----------
-    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (uid,)
+    )
     first_time = not cur.fetchone()
 
     if first_time:
-        # 👉 First message (full reply)
         await message.reply_text(
             beautiful_footer(
                 "📨 **Message Received!**\n"
@@ -8985,10 +8994,12 @@ async def user_handler(client, message: Message):
                 "Our **Ankit Shakya** will reply shortly ⏳"
             )
         )
-        cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
+        cur.execute(
+            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+            (uid,)
+        )
         conn.commit()
     else:
-        # 👉 Other messages (short reply)
         await message.reply_text(
             beautiful_footer("✅ **Message received**")
         )
@@ -9004,14 +9015,13 @@ async def user_handler(client, message: Message):
         f"🆔 ID: `{uid}`\n"
         f"👤 Username: @{message.from_user.username or 'None'}\n\n"
     )
-    
 
     for (aid,) in admins:
         try:
             if message.text:
                 await client.send_message(
                     aid,
-                    f"{header}\n\n💬 {message.text}",
+                    f"{header}💬 {message.text}",
                     reply_markup=admin_buttons(uid)
                 )
             else:
