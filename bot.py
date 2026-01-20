@@ -7469,9 +7469,8 @@ async def build_tag_user_card(client, message):
 
 
 @app.on_message(filters.command("tagall") & filters.group)
-async def tagall_final(client, message):
+async def tagall_working(client, message):
 
-    # Admin only
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
     if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
         return await message.reply_text("❌ Admin only")
@@ -7481,12 +7480,8 @@ async def tagall_final(client, message):
         if not m.user.is_bot:
             mentions.append(m.user.mention)
 
-    if not mentions:
-        return await message.reply_text("No members found")
-
     for i in range(0, len(mentions), 5):
         await message.reply_text(" ".join(mentions[i:i+5]))
-
 
 
 @app.on_message(filters.command("tagadmin") & filters.group)
