@@ -8848,9 +8848,12 @@ def abuse_warning(chat_id, user_id):
     return cur.fetchone()[0]
 
 
-def contains_abuse(text):
-    text = re.sub(r"[^a-zA-Z ]", "", text.lower())
-    return any(w in text for w in ABUSE_WORDS)
+def contains_abuse(text: str) -> bool:
+    if not text:
+        return False
+
+    text = text.lower()
+    return bool(ABUSE_REGEX.search(text))
     
 # ================= SUPPORT SYSTEM =================
 def admin_button(uid):
