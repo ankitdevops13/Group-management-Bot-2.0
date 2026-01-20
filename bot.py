@@ -9188,7 +9188,7 @@ Say hi and enjoy chatting with everyone!
 
 
 # ================= SUPPORT SYSTEM =================
-def admin_buttons(uid):
+def admin_button(uid):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🟢 Reply", callback_data=f"reply:{uid}"),
@@ -9316,13 +9316,13 @@ async def user_handler(client, message: Message):
                 await client.send_message(
                     aid,
                     f"{admin_header}💬 {message.text}{beautiful_footer()}",
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=admin_button(uid)
                 )
             else:
                 await message.copy(
                     aid,
                     caption=f"{admin_header}{beautiful_footer()}",
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=admin_button(uid)
                 )
         except:
             continue
