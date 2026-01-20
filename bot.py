@@ -207,6 +207,16 @@ CREATE TABLE IF NOT EXISTS report_cooldown (
 )
 """)
 
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS tag_cooldown (
+    chat_id INTEGER,
+    user_id INTEGER,
+    last_tag INTEGER,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
 # ======================================================
 # ================= REMINDERS ==========================
 # ======================================================
@@ -235,6 +245,27 @@ CREATE TABLE IF NOT EXISTS mass_delete_pending (
 """)
 
 # ======================================================
+# Tag cooldown
+cur.execute("""
+CREATE TABLE IF NOT EXISTS tag_cooldown (
+    chat_id INTEGER,
+    user_id INTEGER,
+    last_time INTEGER,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
+# Tag cancel
+cur.execute("""
+CREATE TABLE IF NOT EXISTS tag_cancel (
+    chat_id INTEGER,
+    admin_id INTEGER,
+    cancelled INTEGER DEFAULT 0,
+    PRIMARY KEY (chat_id, admin_id)
+)
+""")
+
+
 # ================= INDEXES =============================
 # ======================================================
 cur.execute("""
@@ -7212,464 +7243,66 @@ async def cleanup_abuse_cache_task():
 
             
 # ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =================
-def contains_admin_mention(text: str) -> bool:
-    """Check if text contains @admin mention (various formats)"""
-    if not text:
-        return False
-    
-    text = text.lower()
-    
-    # Check for various admin mention patterns
-    patterns = [
-        r'@admin\b',
-        r'admin\s+help',
-        r'help\s+admin',
-        r'admins\s+please',
-        r'please\s+admin',
-        r'admin\s+ji',
-        r'@admins\b',
-        r'admin\s+sir',
-        r'sir\s+admin',
-        r'hey\s+admin',
-        r'hello\s+admin',
-        r'hi\s+admin',
-        r'attention\s+admin',
-        r'admin\s+attention',
-        r'call\s+admin',
-        r'admin\s+call',
-        r'admin\s+ko\s+bulao',
-        r'bulao\s+admin',
-        r'admin\s+aao',
-        r'aao\s+admin'
-    ]
-    
-    for pattern in patterns:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    
-    # Also check for simple @admin in any form
-    if '@admin' in text or ' admin ' in text:
-        return True
-    
-    return False
+ADMIN_KEYWORDS = ("@admin", "@admins")
+ADMIN_PING_COOLDOWN = 120  # seconds
 
-@app.on_message(filters.group & ~filters.service)
-async def auto_report_on_admin_mention(client, message: Message):
-    """Automatically report when @admin is mentioned - FINAL VERSION"""
-    
-    # Skip if message is from admin or bot
-    if await can_user_restrict(client, message.chat.id, message.from_user.id):
+
+@app.on_message(filters.group & (filters.text | filters.caption))
+async def admin_keyword_detector(client, message: Message):
+
+    if not message.from_user or message.from_user.is_bot:
         return
-    
-    # Get message text
-    if not message.text and not message.caption:
+
+    text = (message.text or message.caption or "").lower()
+
+    if not any(k in text for k in ADMIN_KEYWORDS):
         return
-    
-    text = message.text or message.caption
-    
-    # Check if contains admin mention
-    if not contains_admin_mention(text):
-        return
-    
-    # Check cooldown (1 auto-report per 15 minutes per user)
-    current_time = datetime.now(timezone.utc)
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    now = int(time.time())
+
+    # ---------- COOLDOWN CHECK ----------
     cur.execute(
-        "SELECT last_report_time FROM report_cooldown WHERE user_id=? AND chat_id=?",
-        (message.from_user.id, message.chat.id)
+        "SELECT last_ping FROM admin_ping_cooldown WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
     )
     row = cur.fetchone()
-    
-    if row:
-        last_report = datetime.fromisoformat(row[0])
-        cooldown_remaining = (last_report + timedelta(minutes=15)) - current_time
-        if cooldown_remaining.total_seconds() > 0:
-            # Still in cooldown, send reminder instead
-            try:
-                minutes = int(cooldown_remaining.total_seconds() / 60)
-                seconds = int(cooldown_remaining.total_seconds() % 60)
-                
-                reminder = await message.reply_text(
-                    f"{beautiful_header('moderation')}\n\n"
-                    "⏳ **Request Already Sent**\n\n"
-                    f"You have already mentioned admins recently.\n"
-                    f"Please wait **{minutes}m {seconds}s** before mentioning again.\n\n"
-                    "🙏 **Patience is appreciated**"
-                    f"{beautiful_footer()}"
-                )
-                await asyncio.sleep(8)
-                await reminder.delete()
-            except:
-                pass
-            return
-    
-    # Create automatic report
-    reason = f"Auto-report: Mentioned admins (Message: {text[:50]}...)"
-    
-    # Save report to database
+
+    if row and now - row[0] < ADMIN_PING_COOLDOWN:
+        return
+
     cur.execute(
-        """
-        INSERT INTO user_reports 
-        (chat_id, reporter_id, reported_user_id, reason, status)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (message.chat.id, client.me.id, message.from_user.id, reason, "pending")
+        "INSERT OR REPLACE INTO admin_ping_cooldown (chat_id, user_id, last_ping) VALUES (?, ?, ?)",
+        (chat_id, user_id, now)
     )
     conn.commit()
-    
-    # Update cooldown
-    cur.execute(
-        """
-        INSERT OR REPLACE INTO report_cooldown 
-        (user_id, chat_id, last_report_time)
-        VALUES (?, ?, ?)
-        """,
-        (message.from_user.id, message.chat.id, current_time.isoformat())
+
+    # ---------- FETCH ADMINS (v2 WAY) ----------
+    admin_mentions = []
+
+    async for member in client.get_chat_members(chat_id, filter="administrators"):
+        if member.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        ) and not member.user.is_bot:
+            admin_mentions.append(member.user.mention)
+
+    admin_mentions = " ".join(admin_mentions[:5]) or "Admins"
+
+    # ---------- USER FEEDBACK ----------
+    await message.reply_text(
+        f"{beautiful_header('admin')}\n\n"
+        "🚨 **Admin Alert**\n\n"
+        f"👤 **User:** {message.from_user.mention}\n"
+        f"💬 **Message:** {message.text or 'Media'}\n\n"
+        f"👮 **Admins Notified:**\n{admin_mentions}\n\n"
+        "✅ **Reported to admins.**"
+        f"{beautiful_footer()}"
     )
-    conn.commit()
-    
-    report_id = cur.lastrowid
-    
-    # Notify admins about auto-report
-    await notify_admins_about_auto_report(client, message, report_id, reason)
-    
-    # Send confirmation to user (temporary)
-    try:
-        # Different responses based on message content
-        text_lower = text.lower()
-        if "vc" in text_lower or "voice" in text_lower or "call" in text_lower:
-            response_text = "🎤 **Voice Chat Request Received**\n✅ Admins have been notified about your VC request."
-        elif "help" in text_lower or "problem" in text_lower or "issue" in text_lower:
-            response_text = "🆘 **Help Request Received**\n✅ Your help request has been forwarded to admins."
-        elif "urgent" in text_lower or "emergency" in text_lower:
-            response_text = "🚨 **Urgent Request Received**\n✅ Your urgent message has been prioritized and sent to all admins."
-        else:
-            response_text = "🔔 **Admin Mention Detected**\n✅ Your message has been forwarded to all admins."
-        
-        confirmation_text = f"""{beautiful_header('moderation')}
-
-{response_text}
-
-📋 **Report ID:** `{report_id}`
-👮 **Admins will respond shortly.**
-⏳ Please wait patiently.
-{beautiful_footer()}"""
-        
-        confirmation = await message.reply_text(confirmation_text)
-        
-        # Delete confirmation after 30 seconds
-        await asyncio.sleep(30)
-        await confirmation.delete()
-        
-    except Exception as e:
-        print(f"Error sending confirmation: {e}")
-
-
-
-# ================= NOTIFY ADMINS ABOUT AUTO-REPORT =================
-async def notify_admins_about_auto_report(client, message, report_id, reason):
-    """Send auto-report notification to all group admins"""
-    
-    user = message.from_user
-    chat = message.chat
-    
-    # Get message preview
-    message_preview = message.text or message.caption or "No text content"
-    if len(message_preview) > 300:
-        message_preview = message_preview[:300] + "..."
-    
-    report_message = f"""
-{beautiful_header('support')}
-
-🔔 **ADMIN MENTION DETECTED**
-
-📋 **Report ID:** `{report_id}`
-🚨 **Type:** Auto-generated Report
-💬 **Group:** {chat.title}
-👤 **From:** {user.mention}
-🆔 **User ID:** `{user.id}`
-
-💬 **Message Preview:**
-{message_preview}
-
-📝 **Reason:** {reason}
-🕒 **Time:** {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}
-
-📎 **Message Link:** [Click to view]({message.link})
-
-✅ **Suggested Actions:**
-• Check if user needs help
-• Respond appropriately
-• Resolve the report
-    """
-    
-    # Create buttons based on message content
-    buttons = []
-    text_lower = (message.text or "").lower()
-    
-    # Always have reply button
-    buttons.append([InlineKeyboardButton("💬 Reply to User", callback_data=f"reply:{user.id}")])
-    
-    # Context-specific buttons
-    if "vc" in text_lower or "voice" in text_lower or "call" in text_lower:
-        buttons.append([
-            InlineKeyboardButton("🎤 VC Request", callback_data=f"vc_request:{user.id}:{chat.id}"),
-            InlineKeyboardButton("✅ Mark Resolved", callback_data=f"resolve_report:{chat.id}:{user.id}")
-        ])
-    elif "urgent" in text_lower or "emergency" in text_lower:
-        buttons.append([
-            InlineKeyboardButton("🚨 URGENT", callback_data=f"urgent_report:{chat.id}:{user.id}"),
-            InlineKeyboardButton("✅ Responded", callback_data=f"resolve_report:{chat.id}:{user.id}")
-        ])
-    else:
-        buttons.append([
-            InlineKeyboardButton("✅ Mark Resolved", callback_data=f"resolve_report:{chat.id}:{user.id}"),
-            InlineKeyboardButton("❌ Ignore", callback_data=f"reject_report:{chat.id}:{user.id}")
-        ])
-    
-    buttons.append([
-        InlineKeyboardButton("👤 User Info", callback_data=f"report_user_info:{user.id}:{chat.id}"),
-        InlineKeyboardButton("👀 View Message", url=message.link)
-    ])
-    
-    # Send to all admins
-    admin_count = 0
-    try:
-        async for member in client.get_chat_members(chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER] and not member.user.is_bot:
-                try:
-                    await client.send_message(
-                        member.user.id,
-                        report_message + beautiful_footer(),
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                    admin_count += 1
-                except Exception as e:
-                    print(f"Error sending to admin {member.user.id}: {e}")
-                    continue
-    except Exception as e:
-        print(f"Error getting chat members: {e}")
-    
-    # Log how many admins were notified
-    print(f"Auto-report {report_id}: Notified {admin_count} admins about @admin mention from {user.id}")
 
 
 # ================= CALLBACK HANDLERS FOR AUTO-REPORT =================
-@app.on_callback_query(filters.regex("^vc_request:"))
-async def vc_request_callback(client, cq):
-    """Handle VC request callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Check if callback user is admin in that chat
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("Permission denied", show_alert=True)
-            return
-        
-        # Get user info
-        user = await client.get_users(user_id)
-        chat = await client.get_chat(chat_id)
-        
-        # Update the report message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n✅ **VC RESPONSE SENT**\n👨‍💼 By: {cq.from_user.mention}\n🕒 {datetime.now().strftime('%H:%M:%S')}"
-        )
-        
-        # Notify user about VC
-        try:
-            await client.send_message(
-                user_id,
-                f"{beautiful_header('support')}\n\n"
-                f"🎤 **Voice Chat Update**\n\n"
-                f"✅ Your VC request in **{chat.title}** has been noted.\n"
-                f"👨‍💼 Admin **{cq.from_user.first_name}** will start VC shortly.\n\n"
-                f"Please stay online and wait for the VC to start."
-                f"{beautiful_footer()}"
-            )
-        except:
-            pass
-        
-        # Also mark report as resolved
-        cur.execute(
-            """
-            UPDATE user_reports 
-            SET status='resolved', resolved_by=?, resolved_at=?
-            WHERE reported_user_id=? AND chat_id=? AND status='pending'
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (cq.from_user.id, datetime.now(timezone.utc).isoformat(), user_id, chat_id)
-        )
-        conn.commit()
-        
-        await cq.answer("User notified about VC ✅")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^urgent_report:"))
-async def urgent_report_callback(client, cq):
-    """Handle urgent report callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        chat_id = int(parts[1])
-        user_id = int(parts[2])
-        
-        # Mark as urgent responded
-        cur.execute(
-            """
-            UPDATE user_reports 
-            SET status='urgent_responded', resolved_by=?, resolved_at=?
-            WHERE reported_user_id=? AND chat_id=? AND status='pending'
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (cq.from_user.id, datetime.now(timezone.utc).isoformat(), user_id, chat_id)
-        )
-        conn.commit()
-        
-        # Update message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n🚨 **URGENT RESPONSE**\n👨‍💼 By: {cq.from_user.mention}\n🕒 {datetime.now().strftime('%H:%M:%S')}"
-        )
-        
-        await cq.answer("Marked as urgent response 🚨")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^resolve_report:"))
-async def resolve_report_callback(client, cq):
-    """Mark report as resolved"""
-    
-    try:
-        parts = cq.data.split(":")
-        chat_id = int(parts[1])
-        user_id = int(parts[2])
-        
-        cur.execute(
-            """
-            UPDATE user_reports 
-            SET status='resolved', resolved_by=?, resolved_at=?
-            WHERE reported_user_id=? AND chat_id=? AND status='pending'
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (cq.from_user.id, datetime.now(timezone.utc).isoformat(), user_id, chat_id)
-        )
-        conn.commit()
-        
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n✅ **REPORT RESOLVED**\nBy: {cq.from_user.mention}"
-        )
-        
-        await cq.answer("Report marked as resolved ✅")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^reject_report:"))
-async def reject_report_callback(client, cq):
-    """Reject (ignore) a report"""
-    
-    try:
-        parts = cq.data.split(":")
-        chat_id = int(parts[1])
-        user_id = int(parts[2])
-        
-        cur.execute(
-            """
-            UPDATE user_reports 
-            SET status='rejected', resolved_by=?, resolved_at=?
-            WHERE reported_user_id=? AND chat_id=? AND status='pending'
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (cq.from_user.id, datetime.now(timezone.utc).isoformat(), user_id, chat_id)
-        )
-        conn.commit()
-        
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n❌ **REPORT REJECTED**\nBy: {cq.from_user.mention}"
-        )
-        
-        await cq.answer("Report rejected ❌")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^report_user_info:"))
-async def report_user_info_callback(client, cq):
-    """Show user info for report"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Get user info
-        user = await client.get_users(user_id)
-        
-        # Get user bio first
-        user_bio = await get_user_bio(client, user_id)
-        
-        # Get user warnings
-        cur.execute(
-            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
-        warn_count = cur.fetchone()[0]
-        
-        # Get report count
-        cur.execute(
-            "SELECT COUNT(*) FROM user_reports WHERE reported_user_id=? AND chat_id=?",
-            (user_id, chat_id)
-        )
-        report_count = cur.fetchone()[0]
-        
-        info_text = f"""
-{beautiful_header('info')}
-
-👤 **User Information for Report**
-
-**Basic Info:**
-• Name: {user.first_name or ''} {user.last_name or ''}
-• ID: `{user_id}`
-• Username: @{user.username if user.username else 'None'}
-• Bot: {'🤖 Yes' if user.is_bot else '👤 No'}
-
-**In This Group:**
-• Warnings: {warn_count}/3
-• Reports: {report_count}
-• Status: {'Admin' if await is_group_admin(client, chat_id, user_id) else 'Member'}
-• Bio: {user_bio[:100] if user_bio else 'No bio'}
-
-**Actions:**
-• Use buttons below for quick actions
-        """
-        
-        buttons = [
-            [
-                InlineKeyboardButton("🔇 Mute", callback_data=f"mute_reported:{user_id}:{chat_id}"),
-                InlineKeyboardButton("🚫 Ban", callback_data=f"ban_reported:{user_id}:{chat_id}")
-            ],
-            [
-                InlineKeyboardButton("⚠️ Warn", callback_data=f"warn_reported:{user_id}:{chat_id}"),
-                InlineKeyboardButton("💬 Message", callback_data=f"message_user:{user_id}")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Back", callback_data="back_to_report")
-            ]
-        ]
-        
-        await cq.message.edit_text(
-            info_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-        await cq.answer("User info loaded")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
 
 
 # ================= ADDITIONAL HELPER FUNCTIONS =================
@@ -7691,198 +7324,6 @@ async def get_user_bio(client, user_id: int) -> str:
     except:
         return "Unknown"
 
-@app.on_callback_query(filters.regex("^report_user_warns:"))
-async def report_user_warns_callback(client, cq):
-    """Show user warnings for report"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Get user warnings
-        cur.execute(
-            "SELECT reason, timestamp FROM user_warnings WHERE chat_id=? AND user_id=? ORDER BY timestamp DESC",
-            (chat_id, user_id)
-        )
-        warnings = cur.fetchall()
-        
-        if warnings:
-            warnings_text = "\n".join([f"• {i+1}. {warn[0]} ({warn[1][:16]})" for i, warn in enumerate(warnings)])
-            warn_msg = f"""
-{beautiful_header('info')}
-
-⚠️ **WARNINGS FOR USER**
-
-**Total Warnings:** {len(warnings)}/3
-{progress_bar((len(warnings)/3)*100)}
-
-**Warning History:**
-{warnings_text}
-            """
-        else:
-            warn_msg = f"""
-{beautiful_header('info')}
-
-✅ **No Warnings**
-
-This user has no warnings in this group.
-Good behavior record.
-            """
-        
-        buttons = [
-            [
-                InlineKeyboardButton("⚠️ Add Warning", callback_data=f"add_warning:{user_id}:{chat_id}"),
-                InlineKeyboardButton("⬅️ Back", callback_data="back_to_report")
-            ]
-        ]
-        
-        await cq.message.edit_text(
-            warn_msg + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-        await cq.answer("Warnings loaded")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-# ================= ADDITIONAL CALLBACK HANDLERS =================
-@app.on_callback_query(filters.regex("^mute_reported:"))
-async def mute_reported_callback(client, cq):
-    """Mute reported user directly from callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("You don't have permission to mute", show_alert=True)
-            return
-        
-        # Apply mute
-        await client.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=ChatPermissions()  # All False = fully muted
-        )
-        
-        # Update message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n🔇 **USER MUTED**\nBy: {cq.from_user.mention}"
-        )
-        
-        await cq.answer("User muted successfully")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^ban_reported:"))
-async def ban_reported_callback(client, cq):
-    """Ban reported user directly from callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("You don't have permission to ban", show_alert=True)
-            return
-        
-        # Apply ban
-        await client.ban_chat_member(chat_id, user_id)
-        
-        # Update message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n🚫 **USER BANNED**\nBy: {cq.from_user.mention}"
-        )
-        
-        await cq.answer("User banned successfully")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^add_warning:"))
-async def add_warning_callback(client, cq):
-    """Add warning to user from callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("You don't have permission to warn", show_alert=True)
-            return
-        
-        # Add warning
-        reason = "Warning from report system"
-        cur.execute(
-            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (chat_id, user_id, reason)
-        )
-        conn.commit()
-        
-        # Check for auto-ban
-        cur.execute(
-            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
-        warning_count = cur.fetchone()[0]
-        
-        action = ""
-        if warning_count >= 3:
-            try:
-                await client.ban_chat_member(chat_id, user_id)
-                action = "\n\n🚫 **AUTO-BANNED** for reaching 3 warnings!"
-                cur.execute(
-                    "DELETE FROM user_warnings WHERE chat_id=? AND user_id=?",
-                    (chat_id, user_id)
-                )
-                conn.commit()
-            except:
-                action = "\n\n⚠️ Ban failed (check permissions)"
-        
-        # Update message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n⚠️ **WARNING ADDED**\nTotal: {warning_count}/3{action}"
-        )
-        
-        await cq.answer(f"Warning added ({warning_count}/3)")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-
-# ================= ADMIN RESPONSE TRACKING =================
-@app.on_message(filters.command("responded") & filters.group)
-async def mark_as_responded(client, message: Message):
-    """Mark that admin has responded to user's request"""
-    if not await can_user_restrict(client, message.chat.id, message.from_user.id):
-        return
-    
-    if message.reply_to_message:
-        # Find report for this message
-        user_id = message.reply_to_message.from_user.id
-        cur.execute(
-            """
-            UPDATE user_reports 
-            SET status='responded', resolved_by=?, resolved_at=?
-            WHERE reported_user_id=? AND chat_id=? AND status='pending'
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (message.from_user.id, datetime.now(timezone.utc).isoformat(), user_id, message.chat.id)
-        )
-        conn.commit()
-        
-        await message.reply_text(
-            f"{beautiful_header('support')}\n\n✅ **Marked as responded**\nUser has been helped."
-            f"{beautiful_footer()}"
-        )
 
 # ================= ADMIN AVAILABILITY STATUS =================
 @app.on_message(filters.command("status") & filters.group)
@@ -7917,106 +7358,171 @@ async def admin_status_command(client, message: Message):
     await message.reply_text(status_text + beautiful_footer())
 
 # ================= TAG ALL MEMBERS =================
-@app.on_message(filters.command("tagall") & filters.group)
-async def tag_all_members(client, message: Message):
-    """Tag all group members"""
-    
-    # Check permission
-    if not await can_user_restrict(client, message.chat.id, message.from_user.id):
-        await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n❌ **Permission Denied**" + beautiful_footer()
-        )
-        return
-    
-    # Check cooldown (once per 5 minutes)
-    tag_cooldown_key = f"tagall:{message.chat.id}"
-    current_time = datetime.now(timezone.utc)
-    
-    if tag_cooldown_key in user_warnings_cache:
-        last_tag = user_warnings_cache[tag_cooldown_key]
-        if (current_time - last_tag).seconds < 300:  # 5 minutes
-            remaining = 300 - (current_time - last_tag).seconds
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                f"⏳ **Please Wait**\n\n"
-                f"Tagall can be used once every 5 minutes.\n"
-                f"⏰ Remaining: {remaining//60}m {remaining%60}s"
-                f"{beautiful_footer()}"
-            )
-            return
-    
-    user_warnings_cache[tag_cooldown_key] = current_time
-    
-    # Get custom message
-    tag_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention everyone!"
-    
-    # Inform about tag starting
-    processing_msg = await message.reply_text(
-        f"{beautiful_header('moderation')}\n\n"
-        f"🔔 **TAGGING ALL MEMBERS**\n\n"
-        f"⏳ Please wait, fetching members..."
+
+TAG_BATCH_SIZE = 5        # ek message me kitne mentions
+TAG_COOLDOWN = 300        # 5 minutes
+
+
+def check_tag_cooldown(chat_id, user_id):
+    now = int(time.time())
+    cur.execute(
+        "SELECT last_time FROM tag_cooldown WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    row = cur.fetchone()
+
+    if row and now - row[0] < TAG_COOLDOWN:
+        return False
+
+    cur.execute(
+        "INSERT OR REPLACE INTO tag_cooldown VALUES (?, ?, ?)",
+        (chat_id, user_id, now)
+    )
+    conn.commit()
+    return True
+
+def set_tag_cancel(chat_id, admin_id):
+    cur.execute(
+        "INSERT OR REPLACE INTO tag_cancel (chat_id, admin_id, cancelled) VALUES (?, ?, 1)",
+        (chat_id, admin_id)
+    )
+    conn.commit()
+
+
+def clear_tag_cancel(chat_id, admin_id):
+    cur.execute(
+        "DELETE FROM tag_cancel WHERE chat_id=? AND admin_id=?",
+        (chat_id, admin_id)
+    )
+    conn.commit()
+
+
+def is_tag_cancelled(chat_id, admin_id):
+    cur.execute(
+        "SELECT cancelled FROM tag_cancel WHERE chat_id=? AND admin_id=?",
+        (chat_id, admin_id)
+    )
+    return cur.fetchone() is not None
+
+
+
+async def get_user_role(client, chat_id, user_id):
+    member = await client.get_chat_member(chat_id, user_id)
+    if member.status == ChatMemberStatus.OWNER:
+        return "👑 Owner"
+    if member.status == ChatMemberStatus.ADMINISTRATOR:
+        return "🛡️ Admin"
+    return "👤 Member"
+
+
+async def build_tag_user_card(client, message):
+    user = message.from_user
+    chat = message.chat
+    role = await get_user_role(client, chat.id, user.id)
+
+    return (
+        f"{beautiful_header('card')}\n\n"
+        "🪪 **TAG INITIATOR INFO**\n\n"
+        f"👤 **Name:** {user.mention}\n"
+        f"🧾 **Username:** @{user.username or 'None'}\n"
+        f"🆔 **User ID:** `{user.id}`\n"
+        f"🎭 **Role:** {role}\n"
+        f"🏠 **Group:** {chat.title}\n"
+        f"⏰ **Time:** {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
         f"{beautiful_footer()}"
     )
-    
-    try:
-        # Fetch all members (limited to avoid timeout)
-        members_list = []
-        member_count = 0
-        
-        async for member in client.get_chat_members(message.chat.id, limit=200):
-            if not member.user.is_bot and member.user.id != client.me.id:
-                members_list.append(member.user)
-                member_count += 1
-        
-        # Create mentions
-        mentions = []
-        for user in members_list[:100]:  # Limit to 100 mentions per message
-            if user.username:
-                mentions.append(f"@{user.username}")
-            else:
-                mentions.append(f"[{user.first_name or 'User'}](tg://user?id={user.id})")
-        
-        # Split into chunks of 20 mentions each
-        chunk_size = 20
-        mention_chunks = [mentions[i:i + chunk_size] for i in range(0, len(mentions), chunk_size)]
-        
-        # Send tag messages
-        for i, chunk in enumerate(mention_chunks):
-            tag_text = f"""
-{beautiful_header('moderation')}
 
-🔔 **{tag_message.upper()}**
 
-{' '.join(chunk)}
 
-📢 **Tagged by:** {message.from_user.mention}
-👥 **Page:** {i+1}/{len(mention_chunks)}
-            """
-            
-            await message.chat.send_message(
-                tag_text + beautiful_footer(),
-                parse_mode="Markdown"
-            )
-            await asyncio.sleep(1)  # Delay between messages
-        
-        # Update processing message
-        await processing_msg.edit_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"✅ **TAG COMPLETE**\n\n"
-            f"📢 Message: {tag_message}\n"
-            f"👥 Members tagged: {member_count}\n"
-            f"📨 Messages sent: {len(mention_chunks)}\n"
-            f"👨‍💼 Tagged by: {message.from_user.mention}"
-            f"{beautiful_footer()}"
-        )
-        
-    except Exception as e:
-        await processing_msg.edit_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"❌ **TAG FAILED**\n\n"
-            f"Error: {str(e)[:100]}"
-            f"{beautiful_footer()}"
-      )
+@app.on_message(filters.command("tagadmin") & filters.group)
+async def tag_admins(client, message: Message):
+
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return
+
+    if not check_tag_cooldown(message.chat.id, message.from_user.id):
+        await message.reply_text("⏳ Please wait before tagging again.")
+        return
+
+    clear_tag_cancel(message.chat.id, message.from_user.id)
+
+    # User card
+    await message.reply_text(await build_tag_user_card(client, message))
+
+    # Text source
+    if message.reply_to_message:
+        base_text = message.reply_to_message.text or "🚨 Admin attention needed"
+    else:
+        base_text = " ".join(message.command[1:]) or "🚨 Admin attention needed"
+
+    mentions = []
+    async for m in client.get_chat_members(message.chat.id, filter="administrators"):
+        if not m.user.is_bot:
+            mentions.append(m.user.mention)
+
+    header = f"{beautiful_header('admin')}\n\n{base_text}\n\n"
+    footer = beautiful_footer()
+
+    for i in range(0, len(mentions), TAG_BATCH_SIZE):
+        if is_tag_cancelled(message.chat.id, message.from_user.id):
+            break
+        batch = " ".join(mentions[i:i + TAG_BATCH_SIZE])
+        await message.reply_text(header + batch + footer)
+
+
+@app.on_message(filters.command("tagall") & filters.group)
+async def tag_all(client, message: Message):
+
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return
+
+    if not check_tag_cooldown(message.chat.id, message.from_user.id):
+        await message.reply_text("⏳ Please wait before tagging again.")
+        return
+
+    clear_tag_cancel(message.chat.id, message.from_user.id)
+
+    # User card
+    await message.reply_text(await build_tag_user_card(client, message))
+
+    # Text source
+    if message.reply_to_message:
+        base_text = message.reply_to_message.text or "📣 Attention everyone"
+    else:
+        base_text = " ".join(message.command[1:]) or "📣 Attention everyone"
+
+    mentions = []
+    async for m in client.get_chat_members(message.chat.id):
+        if not m.user.is_bot:
+            mentions.append(m.user.mention)
+
+    header = f"{beautiful_header('notify')}\n\n{base_text}\n\n"
+    footer = beautiful_footer()
+
+    for i in range(0, len(mentions), TAG_BATCH_SIZE):
+        if is_tag_cancelled(message.chat.id, message.from_user.id):
+            break
+        batch = " ".join(mentions[i:i + TAG_BATCH_SIZE])
+        await message.reply_text(header + batch + footer)
+
+@app.on_message(filters.command("cancel") & filters.group)
+async def cancel_tagging(client, message: Message):
+
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return
+
+    set_tag_cancel(message.chat.id, message.from_user.id)
+
+    await message.reply_text(
+        f"{beautiful_header('notify')}\n\n"
+        "❌ **Tagging Cancelled**\n"
+        "Ongoing tag process has been stopped."
+        f"{beautiful_footer()}"
+    )
+
 
 
 # ================= COMPLETE ID COMMAND =================
