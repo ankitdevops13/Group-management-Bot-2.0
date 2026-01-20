@@ -7255,7 +7255,9 @@ async def cleanup_abuse_cache_task():
 
 
             
-# ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =================
+# ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =========
+
+# ================= AUTO REPORT ON @admin / admin keyword =================
 
 ADMIN_PING_COOLDOWN = 120  # seconds
 
@@ -7275,14 +7277,20 @@ async def admin_keyword_detector(client, message: Message):
     if not message.from_user or message.from_user.is_bot:
         return
 
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # ❌ Ignore admins / owner themselves
+    member = await client.get_chat_member(chat_id, user_id)
+    if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return
+
     text = (message.text or message.caption or "").lower()
 
-    # ❌ No keyword → exit
+    # ❌ No keyword
     if not ADMIN_KEYWORD_REGEX.search(text):
         return
 
-    chat_id = message.chat.id
-    user_id = message.from_user.id
     now = int(time.time())
 
     # ---------- COOLDOWN ----------
@@ -7296,19 +7304,16 @@ async def admin_keyword_detector(client, message: Message):
         return
 
     cur.execute(
-        "INSERT OR REPLACE INTO admin_ping_cooldown VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO admin_ping_cooldown (chat_id, user_id, last_ping) VALUES (?, ?, ?)",
         (chat_id, user_id, now)
     )
     conn.commit()
 
     # ---------- FETCH ADMINS ----------
     admin_mentions = []
-    async for member in client.get_chat_members(chat_id, filter="administrators"):
-        if member.status in (
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER
-        ) and not member.user.is_bot:
-            admin_mentions.append(member.user.mention)
+    async for m in client.get_chat_members(chat_id, filter="administrators"):
+        if not m.user.is_bot:
+            admin_mentions.append(m.user.mention)
 
     admin_mentions = " ".join(admin_mentions[:5]) or "Admins"
 
@@ -7327,7 +7332,6 @@ async def admin_keyword_detector(client, message: Message):
         "✅ **Reported to admins.**"
         f"{beautiful_footer()}"
     )
-
 
 
 # ================= CALLBACK HANDLERS FOR AUTO-REPORT =================
