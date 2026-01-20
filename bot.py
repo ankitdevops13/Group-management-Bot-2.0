@@ -89,6 +89,28 @@ CREATE TABLE IF NOT EXISTS admin_reply_target (
     user_id INTEGER
 )
 """)
+
+cur.execute("CREATE TABLE IF NOT EXISTS admins (admin_id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS blocked_users (user_id INTEGER PRIMARY KEY)")
+cur.execute("""
+CREATE TABLE IF NOT EXISTS contact_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    sender TEXT,
+    message_type TEXT,
+    content TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS abuse_warnings (user_id INTEGER PRIMARY KEY, count INTEGER)")
+cur.execute("""
+CREATE TABLE IF NOT EXISTS admin_reply_target (
+    admin_id INTEGER PRIMARY KEY,
+    user_id INTEGER
+)
+""")
+cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (SUPER_ADMIN,))
 # Abuse words database 
 
 cur.execute("""
@@ -335,6 +357,7 @@ async def get_admin_status_text(client, chat_id, user_id):
     return " + ".join(status_parts)
 
 # Abude words auto detect helper function 
+
 def abuse_warning(uid):
     cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
     cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
@@ -2385,7 +2408,7 @@ async def final_auto_abuse_handler(client, message):
             f"{beautiful_header('WARNING')}\n\n"
             f"⚠️ **WARNING 1/5**\n"
             f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`"
+            f"🆔 **ID:** `{user_id}`\n"
             f"🚫 Abuse language is not allowed"
             f"{beautiful_footer()}"
         )
@@ -2395,7 +2418,7 @@ async def final_auto_abuse_handler(client, message):
             f"{beautiful_header('WARNING')}\n\n"
             f"⚠️ **WARNING 2/5**\n"
             f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`"
+            f"🆔 **ID:** `{user_id}`\n"
             f"🚫 Abuse language is not allowed"
             f"{beautiful_footer()}"
         )
@@ -2405,7 +2428,7 @@ async def final_auto_abuse_handler(client, message):
             f"{beautiful_header('WARNING')}\n\n"
             f"⚠️ **WARNING 2/5**\n"
             f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`"
+            f"🆔 **ID:** `{user_id}`\n"
             f"🚫 Abuse language is not allowed\n Next Warning As You Mute 🔕"
             f"{beautiful_footer()}"
         )
@@ -2424,7 +2447,7 @@ async def final_auto_abuse_handler(client, message):
             f"{beautiful_header('ABUSE WORDS')}\n\n"
             f"🔇 **MUTED (10 MINUTES)**\n"
             f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`"
+            f"🆔 **ID:** `{user_id}`\n"
             f"❌ Reason: Repeated abuse (4/5)\n Last Warning Other Wise You Ban 🚫"
             f"{beautiful_footer()}"
         )
@@ -2437,7 +2460,7 @@ async def final_auto_abuse_handler(client, message):
             f"{beautiful_header('ABUSE WORDS')}\n\n"
             f"🚫 **BANNED**\n"
             f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`"
+            f"🆔 **ID:** `{user_id}`\n"
             f"❌ Reason: Repeated abuse (5/5)"
             f"{beautiful_footer()}"
         )
