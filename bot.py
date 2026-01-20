@@ -7466,78 +7466,46 @@ async def build_tag_user_card(client, message):
 
 
 
-@app.on_message(filters.command("tagadmin") & filters.group)
-async def tag_admins(client, message: Message):
-
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return
-
-    if not check_tag_cooldown(message.chat.id, message.from_user.id):
-        await message.reply_text("⏳ Please wait before tagging again.")
-        return
-
-    clear_tag_cancel(message.chat.id, message.from_user.id)
-
-    # User card
-    await message.reply_text(await build_tag_user_card(client, message))
-
-    # Text source
-    if message.reply_to_message:
-        base_text = message.reply_to_message.text or "🚨 Admin attention needed"
-    else:
-        base_text = " ".join(message.command[1:]) or "🚨 Admin attention needed"
-
-    mentions = []
-    async for m in client.get_chat_members(message.chat.id, filter="administrators"):
-        if not m.user.is_bot:
-            mentions.append(m.user.mention)
-
-    header = f"{beautiful_header('admin')}\n\n{base_text}\n\n"
-    footer = beautiful_footer()
-
-    for i in range(0, len(mentions), TAG_BATCH_SIZE):
-        if is_tag_cancelled(message.chat.id, message.from_user.id):
-            break
-        batch = " ".join(mentions[i:i + TAG_BATCH_SIZE])
-        await message.reply_text(header + batch + footer)
 
 
 @app.on_message(filters.command("tagall") & filters.group)
-async def tag_all(client, message: Message):
+async def tagall_final(client, message):
 
+    # Admin only
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
     if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return
-
-    if not check_tag_cooldown(message.chat.id, message.from_user.id):
-        await message.reply_text("⏳ Please wait before tagging again.")
-        return
-
-    clear_tag_cancel(message.chat.id, message.from_user.id)
-
-    # User card
-    await message.reply_text(await build_tag_user_card(client, message))
-
-    # Text source
-    if message.reply_to_message:
-        base_text = message.reply_to_message.text or "📣 Attention everyone"
-    else:
-        base_text = " ".join(message.command[1:]) or "📣 Attention everyone"
+        return await message.reply_text("❌ Admin only")
 
     mentions = []
     async for m in client.get_chat_members(message.chat.id):
         if not m.user.is_bot:
             mentions.append(m.user.mention)
 
-    header = f"{beautiful_header('notify')}\n\n{base_text}\n\n"
-    footer = beautiful_footer()
+    if not mentions:
+        return await message.reply_text("No members found")
 
-    for i in range(0, len(mentions), TAG_BATCH_SIZE):
-        if is_tag_cancelled(message.chat.id, message.from_user.id):
-            break
-        batch = " ".join(mentions[i:i + TAG_BATCH_SIZE])
-        await message.reply_text(header + batch + footer)
+    for i in range(0, len(mentions), 5):
+        await message.reply_text(" ".join(mentions[i:i+5]))
+
+
+
+@app.on_message(filters.command("tagadmin") & filters.group)
+async def tagadmin_final(client, message):
+
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return
+
+    mentions = []
+    async for m in client.get_chat_members(message.chat.id, filter="administrators"):
+        if not m.user.is_bot:
+            mentions.append(m.user.mention)
+
+    if not mentions:
+        return await message.reply_text("No admins")
+
+    await message.reply_text(" ".join(mentions))
+
 
 @app.on_message(filters.command("cancel") & filters.group)
 async def cancel_tagging(client, message: Message):
