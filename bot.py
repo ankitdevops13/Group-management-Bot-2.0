@@ -103,13 +103,19 @@ CREATE TABLE IF NOT EXISTS contact_history (
 )
 """)
 cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS abuse_warnings (user_id INTEGER PRIMARY KEY, count INTEGER)")
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
     user_id INTEGER
 )
 """)
+cur.execute("""
+CREATE TABLE IF NOT EXISTS user_warnings (
+    user_id INTEGER PRIMARY KEY,
+    count INTEGER DEFAULT 0
+)
+""")
+conn.commit()
 cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (SUPER_ADMIN,))
 # Abuse words database 
 
@@ -417,7 +423,30 @@ def contains_abuse(text):
     text = re.sub(r"[^a-zA-Z ]", "", text.lower())
     return any(w in text for w in ABUSE_WORDS)
 
+    
+def abuse_warning(uid):
+    # ensure row exists
+    cur.execute(
+        "INSERT OR IGNORE INTO user_warnings (user_id, count) VALUES (?, 0)",
+        (uid,)
+    )
 
+    # increment count
+    cur.execute(
+        "UPDATE user_warnings SET count = count + 1 WHERE user_id=?",
+        (uid,)
+    )
+
+    conn.commit()
+
+    # fetch updated count
+    cur.execute(
+        "SELECT count FROM user_warnings WHERE user_id=?",
+        (uid,)
+    )
+    return cur.fetchone()[0]
+
+    
 # ================= HELPER FUNCTIONS =================
 def is_admin(uid):
     """Check if user is bot admin"""
