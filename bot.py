@@ -6,6 +6,7 @@ import csv
 import os
 import sys  # Added missing import
 import psutil  # Added missing import
+import time
 from datetime import datetime, timedelta, timezone
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
@@ -86,6 +87,25 @@ cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
     user_id INTEGER
+)
+""")
+# Abuse words database 
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS abuse_warns (
+    chat_id INTEGER,
+    user_id INTEGER,
+    warns INTEGER DEFAULT 0,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS mutes (
+    chat_id INTEGER,
+    user_id INTEGER,
+    unmute_at INTEGER,
+    PRIMARY KEY (chat_id, user_id)
 )
 """)
 
@@ -313,6 +333,61 @@ async def get_admin_status_text(client, chat_id, user_id):
         return "👤 **Regular User** (No admin rights)"
     
     return " + ".join(status_parts)
+
+# Abude words auto detect helper function 
+def abuse_warning(uid):
+    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
+    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    conn.commit()
+    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    return cur.fetchone()[0]
+
+def get_warn(chat_id, user_id):
+    cur.execute(
+        "SELECT warns FROM abuse_warns WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    row = cur.fetchone()
+    return row[0] if row else 0
+
+
+def add_warn(chat_id, user_id):
+    cur.execute(
+        "INSERT OR IGNORE INTO abuse_warns (chat_id, user_id, warns) VALUES (?, ?, 0)",
+        (chat_id, user_id)
+    )
+    cur.execute(
+        "UPDATE abuse_warns SET warns = warns + 1 WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    conn.commit()
+    return get_warn(chat_id, user_id)
+
+
+def reset_warn(chat_id, user_id):
+    cur.execute(
+        "DELETE FROM abuse_warns WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    conn.commit()
+
+
+def save_mute(chat_id, user_id, duration):
+    unmute_at = int(time.time()) + duration
+    cur.execute(
+        "INSERT OR REPLACE INTO mutes (chat_id, user_id, unmute_at) VALUES (?, ?, ?)",
+        (chat_id, user_id, unmute_at)
+    )
+    conn.commit()
+
+
+def remove_mute(chat_id, user_id):
+    cur.execute(
+        "DELETE FROM mutes WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    conn.commit()
+
 
 # ================= HELPER FUNCTIONS =================
 def is_admin(uid):
@@ -2218,6 +2293,149 @@ async def tagall_menu_callback(client, cq):
         ])
     )
     await cq.answer()
+
+ABUSE_WORDS = [
+    # English abuse words
+    "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "pussy",
+    "whore", "slut", "motherfucker", "damn", "hell", "crap", "bullshit",
+    "nigger", "nigga", "faggot", "retard", "idiot", "moron", "stupid",
+    "fool", "dumb", "stupid", "dickhead", "arsehole", "cock", "wanker",
+    "twat", "slag", "skank", "hoe", "slutty", "bitchy", "fucking",
+    
+    # Hindi abuse words (common)
+    "madarchod", "behenchod", "chutiya", "gandu", "bhosdike", "lund", "randi",
+    "harami", "kamina", "kutta", "kutte", "kuttiya", "lauda", "lavde", "lode",
+    "chut", "gand", "bhenchod", "maderchod", "bosdike", "bosdi", "rand",
+    "choot", "gaand", "bhosdi", "bhosda", "chodu", "chod", "chudai", "chud",
+    "gandu", "gandoo", "gandwe", "gandfat", "gandmasti", "gandu", "gaand",
+    
+    # Romanized Hindi abuse (common variations)
+    "mc", "bc", "randi", "chutiye", "bkl", "bsdk", "bsdka", "lodu", "lavdu",
+    "madar", "behen", "chootiya", "chutiye", "gandu", "gandwe", "lund",
+    "land", "laund", "launda", "chut", "choot", "bhen", "maa", "maa ki",
+    
+    # Evasion attempts (common misspellings)
+    "fuk", "shyt", "bich", "asshle", "mdrchod", "bhenchd", "chtiya", "gndu",
+    "lundh", "rndi", "hrma", "kmina", "kuttaa", "kutti", "lawda", "lawde",
+    "lauda", "laude", "choot", "gaandu", "bhonsdi", "bhosdika", "choduu",
+    "fak", "shit", "bich", "ass", "mader", "behn", "chutia", "gando",
+    
+    # Number substitutions (common evasions)
+    "f0ck", "sh1t", "b1tch", "4ss", "@ss", "@ssh0le", "m0therfucker",
+    "n1gger", "f4gg0t", "r3tard", "1d10t", "m0r0n", "st00pid",
+    
+    # Character substitutions
+    "f*ck", "sh*t", "b*tch", "a**hole", "a$$hole", "f**k", "s**t",
+    "b****", "m*****f*****", "n*****", "f*****",
+    
+    # Additional abusive terms in context
+    "suck my", "eat my", "kill you", "kill yourself", "die", "death",
+    "hate you", "fuck off", "fuck you", "go to hell", "burn in hell",
+    "son of a", "your mom", "your mother", "your sister", "your father",
+]
+
+ABUSE_REGEX = re.compile(
+    r"\b(" + "|".join(map(re.escape, ABUSE_WORDS)) + r")\b",
+    re.IGNORECASE
+)
+
+MUTE_TIME = 600  # 10 minutes
+
+@app.on_message(filters.group & filters.text & ~filters.me)
+async def final_auto_abuse_handler(client, message):
+    if not message.from_user:
+        return
+
+    if not ABUSE_REGEX.search(message.text):
+        return
+
+    chat_id = message.chat.id
+    user = message.from_user
+    user_id = user.id
+
+    # ===== IMMUNITY =====
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            return
+    except:
+        pass
+
+    if is_admin(user_id):  # Bot admin / super admin
+        return
+
+    # ===== DELETE ABUSE MESSAGE =====
+    try:
+        await message.delete()
+    except:
+        pass
+
+    # ===== WARN COUNT =====
+    warns = add_warn(chat_id, user_id)
+
+    # ===== ACTIONS =====
+    if warns == 1:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 1/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`"
+            f"🚫 Abuse language is not allowed"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns == 2:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 2/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`"
+            f"🚫 Abuse language is not allowed"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns == 3:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 2/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`"
+            f"🚫 Abuse language is not allowed\n Next Warning As You Mute 🔕"
+            f"{beautiful_footer()}"
+        )
+        
+    elif warns == 4:
+        await client.restrict_chat_member(
+            chat_id,
+            user_id,
+            ChatPermissions(can_send_messages=False),
+            until_date=datetime.now(timezone.utc) + timedelta(seconds=MUTE_TIME)
+        )
+
+        save_mute(chat_id, user_id, MUTE_TIME)
+
+        await message.reply_text(
+            f"{beautiful_header('ABUSE WORDS')}\n\n"
+            f"🔇 **MUTED (10 MINUTES)**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`"
+            f"❌ Reason: Repeated abuse (4/5)\n Last Warning Other Wise You Ban 🚫"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns >= 5:
+        await client.ban_chat_member(chat_id, user_id)
+        reset_warn(chat_id, user_id)
+
+        await message.reply_text(
+            f"{beautiful_header('ABUSE WORDS')}\n\n"
+            f"🚫 **BANNED**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`"
+            f"❌ Reason: Repeated abuse (5/5)"
+            f"{beautiful_footer()}"
+        )
+
 
 # ================= CHECK ADMIN TYPE COMMAND =================
 @app.on_message(filters.command("checkadmin") & filters.group)
@@ -5292,732 +5510,105 @@ async def mass_delete_text_confirmation(client, message: Message):
 
 
 
-# ================= ENHANCED ABUSE WORDS LIST =================
-
-# ================= ENHANCED ABUSE WORDS LIST =================
-ABUSE_WORDS = [
-    # English abuse words
-    "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "pussy",
-    "whore", "slut", "motherfucker", "damn", "hell", "crap", "bullshit",
-    "nigger", "nigga", "faggot", "retard", "idiot", "moron", "stupid",
-    "fool", "dumb", "stupid", "dickhead", "arsehole", "cock", "wanker",
-    "twat", "slag", "skank", "hoe", "slutty", "bitchy", "fucking",
-    
-    # Hindi abuse words (common)
-    "madarchod", "behenchod", "chutiya", "gandu", "bhosdike", "lund", "randi",
-    "harami", "kamina", "kutta", "kutte", "kuttiya", "lauda", "lavde", "lode",
-    "chut", "gand", "bhenchod", "maderchod", "bosdike", "bosdi", "rand",
-    "choot", "gaand", "bhosdi", "bhosda", "chodu", "chod", "chudai", "chud",
-    "gandu", "gandoo", "gandwe", "gandfat", "gandmasti", "gandu", "gaand",
-    
-    # Romanized Hindi abuse (common variations)
-    "mc", "bc", "randi", "chutiye", "bkl", "bsdk", "bsdka", "lodu", "lavdu",
-    "madar", "behen", "chootiya", "chutiye", "gandu", "gandwe", "lund",
-    "land", "laund", "launda", "chut", "choot", "bhen", "maa", "maa ki",
-    
-    # Evasion attempts (common misspellings)
-    "fuk", "shyt", "bich", "asshle", "mdrchod", "bhenchd", "chtiya", "gndu",
-    "lundh", "rndi", "hrma", "kmina", "kuttaa", "kutti", "lawda", "lawde",
-    "lauda", "laude", "choot", "gaandu", "bhonsdi", "bhosdika", "choduu",
-    "fak", "shit", "bich", "ass", "mader", "behn", "chutia", "gando",
-    
-    # Number substitutions (common evasions)
-    "f0ck", "sh1t", "b1tch", "4ss", "@ss", "@ssh0le", "m0therfucker",
-    "n1gger", "f4gg0t", "r3tard", "1d10t", "m0r0n", "st00pid",
-    
-    # Character substitutions
-    "f*ck", "sh*t", "b*tch", "a**hole", "a$$hole", "f**k", "s**t",
-    "b****", "m*****f*****", "n*****", "f*****",
-    
-    # Additional abusive terms in context
-    "suck my", "eat my", "kill you", "kill yourself", "die", "death",
-    "hate you", "fuck off", "fuck you", "go to hell", "burn in hell",
-    "son of a", "your mom", "your mother", "your sister", "your father",
-]
-
-def detect_abuse(text: str) -> tuple[bool, list, int]:
-    """Detect abusive language in text - SIMPLE & EFFECTIVE"""
-    if not text or not isinstance(text, str):
-        return False, [], 0
-    
-    text_lower = text.lower()
-    found_words = []
-    
-    # Direct word matching
-    for word in ABUSE_WORDS:
-        if word in text_lower:
-            # Check if it's a whole word
-            pattern = r'\b' + re.escape(word) + r'\b'
-            if re.search(pattern, text_lower):
-                found_words.append(word)
-    
-    # Check for spaced abuse (f u c k)
-    if re.search(r'f\s*u\s*c\s*k', text_lower):
-        found_words.append("fuck_spaced")
-    if re.search(r's\s*h\s*i\s*t', text_lower):
-        found_words.append("shit_spaced")
-    if re.search(r'b\s*i\s*t\s*c\s*h', text_lower):
-        found_words.append("bitch_spaced")
-    
-    # Check for number substitutions
-    if re.search(r'f[0-9]+ck', text_lower):
-        found_words.append("fuck_number")
-    if re.search(r'sh[0-9]+t', text_lower):
-        found_words.append("shit_number")
-    if re.search(r'b[0-9]+tch', text_lower):
-        found_words.append("bitch_number")
-    
-    # Check for character substitution
-    if re.search(r'f\*ck', text_lower):
-        found_words.append("fuck_star")
-    if re.search(r'sh\*t', text_lower):
-        found_words.append("shit_star")
-    if re.search(r'b\*tch', text_lower):
-        found_words.append("bitch_star")
-    if re.search(r'@ss', text_lower):
-        found_words.append("ass_symbol")
-    
-    # Calculate severity
-    severity = 0
-    if found_words:
-        # Base severity
-        severity = len(found_words)
-        
-        # Increase severity for Hindi abuse
-        hindi_words = ["madarchod", "behenchod", "chutiya", "gandu", "bhosdike", "randi"]
-        for word in found_words:
-            if any(hindi in word for hindi in hindi_words):
-                severity += 2
-        
-        # Increase severity for severe English abuse
-        severe_english = ["motherfucker", "nigger", "faggot", "cunt", "whore"]
-        for word in found_words:
-            if any(severe in word for severe in severe_english):
-                severity += 2
-        
-        # Cap at 10
-        severity = min(severity, 10)
-    
-    return len(found_words) > 0, found_words, severity
-
-
-# ================= 3-STRIKE SYSTEM =================
-def get_strike_count(user_id: int, chat_id: int) -> int:
-    """Get user's current strike count"""
-    cur.execute(
-        """
-        SELECT COUNT(*) FROM user_warnings 
-        WHERE user_id=? AND chat_id=? 
-        AND timestamp > datetime('now', '-7 days')
-        """,
-        (user_id, chat_id)
-    )
-    return cur.fetchone()[0] or 0
-
-
-def add_strike(user_id: int, chat_id: int, reason: str):
-    """Add a strike for user"""
-    cur.execute(
-        "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-        (chat_id, user_id, f"Strike: {reason}")
-    )
-    conn.commit()
-
-
-# ================= BEAUTIFUL UI CARDS =================
-def strike_warning_card(user_mention: str, user_id: int, strike_num: int, 
-                       found_words: list, message_preview: str) -> str:
-    """Create strike warning card"""
-    
-    strike_icons = ["❶", "❷", "❸"]
-    strike_colors = ["🟡", "🟠", "🔴"]
-    
-    card = f"""
-╔══════════════════════════════════════════╗
-   {strike_icons[strike_num-1]}  **STRIKE {strike_num}/3**  {strike_colors[strike_num-1]}
-╚══════════════════════════════════════════╝
-
-👤 **USER:** {user_mention}
-🆔 **ID:** `{user_id}`
-📊 **STRIKE:** {strike_num}/3
-
-🔍 **ABUSE DETECTED:**
-• Found: {', '.join(found_words[:5])}
-• Time: {datetime.now().strftime('%H:%M:%S')}
-
-💬 **OFFENSIVE CONTENT:**
-{message_preview[:120]}{'...' if len(message_preview) > 120 else ''}
-
-📋 **3-STRIKE SYSTEM:**
-{strike_icons[0]} **STRIKE 1:** Warning Only (This)
-{strike_icons[1]} **STRIKE 2:** 6-hour Mute
-{strike_icons[2]} **STRIKE 3:** Permanent Ban
-
-⚠️ **NEXT ACTION:**
-• Next violation: {'6-hour mute' if strike_num == 1 else 'PERMANENT BAN'}
-• Strikes reset after 7 days
-"""
-    
-    return card + beautiful_footer()
-
-
-def strike_mute_card(user_mention: str, user_id: int, found_words: list, 
-                    duration: str, message_preview: str) -> str:
-    """Create strike 2 mute card"""
-    
-    card = f"""
-╔══════════════════════════════════════════╗
-   ❷  **STRIKE 2 - USER MUTED**  🔇
-╚══════════════════════════════════════════╝
-
-👤 **USER:** {user_mention}
-🆔 **ID:** `{user_id}`
-📊 **STRIKES:** 2/3
-⏰ **DURATION:** {duration}
-
-🔍 **REASON:**
-• Repeated abusive language
-• Words: {', '.join(found_words[:5])}
-• Violation: Second offense
-
-💬 **OFFENSIVE MESSAGE:**
-{message_preview[:100]}{'...' if len(message_preview) > 100 else ''}
-
-🔇 **MUTE DETAILS:**
-• Cannot send messages for {duration}
-• Auto-unmute after {duration}
-• Can still read messages
-
-⏳ **NEXT STEP:**
-• One more violation = PERMANENT BAN
-• Clean record for 7 days resets strikes
-"""
-    
-    return card + beautiful_footer()
-
-
-def strike_ban_card(user_mention: str, user_id: int, found_words: list, 
-                   message_preview: str) -> str:
-    """Create strike 3 ban card"""
-    
-    card = f"""
-╔══════════════════════════════════════════╗
-   ❸  **STRIKE 3 - USER BANNED**  🚫
-╚══════════════════════════════════════════╝
-
-👤 **USER:** {user_mention}
-🆔 **ID:** `{user_id}`
-📊 **STRIKES:** 3/3
-⛔ **ACTION:** PERMANENT BAN
-
-📋 **STRIKE HISTORY:**
-❶ **Strike 1:** Warning issued
-❷ **Strike 2:** 6-hour mute issued  
-❸ **Strike 3:** PERMANENT BAN applied
-
-🔍 **FINAL VIOLATION:**
-• Words: {', '.join(found_words[:5])}
-• Time: {datetime.now().strftime('%H:%M:%S')}
-
-💬 **FINAL OFFENSIVE MESSAGE:**
-{message_preview[:80]}{'...' if len(message_preview) > 80 else ''}
-
-🚫 **BAN CONSEQUENCES:**
-• Permanently removed from group
-• Cannot rejoin ever
-• All previous warnings cleared
-
-⚠️ **IMPORTANT:**
-• This is a PERMANENT ban
-• Only group admins can unban
-• User must appeal to admins directly
-"""
-    
-    return card + beautiful_footer()
-
-
-# ================= WORKING ABUSE DETECTION HANDLER =================
-@app.on_message(filters.group & ~filters.service)
-async def abuse_detection_handler(client, message: Message):
-    """Main abuse detection handler - FRESH & WORKING"""
-    
-    print(f"\n🔍 Checking message from {message.from_user.id}")
-    
-    # Skip if admin
-    if await can_user_restrict(client, message.chat.id, message.from_user.id):
-        print("Skipping - user is admin")
-        return
-    
-    # Get message text
-    text = ""
-    if message.text:
-        text = message.text
-        print(f"Text: {text[:50]}...")
-    elif message.caption:
-        text = message.caption
-        print(f"Caption: {text[:50]}...")
-    else:
-        print("No text/caption - skipping")
-        return
-    
-    # Detect abuse
-    has_abuse, found_words, severity = detect_abuse(text)
-    print(f"Has abuse: {has_abuse}, Words: {found_words}, Severity: {severity}")
-    
-    if not has_abuse:
-        print("No abuse found - skipping")
-        return
-    
-    # Get user info
-    user = message.from_user
-    chat_id = message.chat.id
-    user_id = user.id
-    
-    # Get current strike count
-    current_strikes = get_strike_count(user_id, chat_id)
-    new_strike_num = current_strikes + 1
-    
-    print(f"Current strikes: {current_strikes}, New strike: {new_strike_num}")
-    
-    # Delete abusive message
-    try:
-        await message.delete()
-        print("✅ Message deleted")
-    except Exception as e:
-        print(f"❌ Failed to delete: {e}")
-    
-    # Apply appropriate action
-    try:
-        if new_strike_num == 1:
-            await handle_strike_1(client, chat_id, user, found_words, text, severity)
-        
-        elif new_strike_num == 2:
-            await handle_strike_2(client, chat_id, user, found_words, text, severity)
-        
-        elif new_strike_num >= 3:
-            await handle_strike_3(client, chat_id, user, found_words, text, severity)
-    
-    except Exception as e:
-        print(f"❌ Error in handler: {e}")
-
-
-async def handle_strike_1(client, chat_id, user, found_words, text, severity):
-    """Handle Strike 1: Warning"""
-    
-    # Create warning card
-    warning_msg = strike_warning_card(
-        user_mention=user.mention,
-        user_id=user.id,
-        strike_num=1,
-        found_words=found_words,
-        message_preview=text[:120]
-    )
-    
-    # Send warning
-    sent_msg = await client.send_message(chat_id, warning_msg)
-    
-    # Add strike to database
-    add_strike(user.id, chat_id, f"Strike 1: {', '.join(found_words[:3])}")
-    
-    print("✅ Strike 1: Warning sent")
-    
-    # Auto-delete after 30 seconds
-    await asyncio.sleep(30)
-    try:
-        await sent_msg.delete()
-        print("✅ Warning message deleted")
-    except:
-        pass
-
-
-async def handle_strike_2(client, chat_id, user, found_words, text, severity):
-    """Handle Strike 2: 6-hour Mute"""
-    
-    # Apply 6-hour mute
-    mute_duration = timedelta(hours=6)
-    unmute_time = datetime.now(timezone.utc) + mute_duration
-    
-    try:
-        await client.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user.id,
-            permissions=ChatPermissions(),
-            until_date=unmute_time
-        )
-        
-        # Store mute info
-        if chat_id not in user_mutes:
-            user_mutes[chat_id] = {}
-        user_mutes[chat_id][user.id] = unmute_time
-        
-        print("✅ User muted for 6 hours")
-        
-    except Exception as e:
-        print(f"❌ Failed to mute: {e}")
-        return
-    
-    # Create mute card
-    mute_msg = strike_mute_card(
-        user_mention=user.mention,
-        user_id=user.id,
-        found_words=found_words,
-        duration="6 hours",
-        message_preview=text[:100]
-    )
-    
-    # Send mute notification
-    sent_msg = await client.send_message(chat_id, mute_msg)
-    
-    # Add strike to database
-    add_strike(user.id, chat_id, f"Strike 2 (6h mute): {', '.join(found_words[:3])}")
-    
-    print("✅ Strike 2: 6-hour mute applied")
-    
-    # Auto-delete after 45 seconds
-    await asyncio.sleep(45)
-    try:
-        await sent_msg.delete()
-        print("✅ Mute message deleted")
-    except:
-        pass
-
-
-async def handle_strike_3(client, chat_id, user, found_words, text, severity):
-    """Handle Strike 3: Permanent Ban"""
-    
-    # Apply permanent ban
-    try:
-        await client.ban_chat_member(chat_id, user.id)
-        print("✅ User permanently banned")
-    except Exception as e:
-        print(f"❌ Failed to ban: {e}")
-        return
-    
-    # Create ban card
-    ban_msg = strike_ban_card(
-        user_mention=user.mention,
-        user_id=user.id,
-        found_words=found_words,
-        message_preview=text[:80]
-    )
-    
-    # Send ban notification
-    sent_msg = await client.send_message(chat_id, ban_msg)
-    
-    # Add final strike
-    add_strike(user.id, chat_id, f"Strike 3 (PERMANENT BAN): {', '.join(found_words[:3])}")
-    
-    print("✅ Strike 3: Permanent ban applied")
-    
-    # Don't delete ban message immediately
-    await asyncio.sleep(60)
-    try:
-        await sent_msg.delete()
-        print("✅ Ban message deleted")
-    except:
-        pass
-
-
-# ================= TEST COMMAND =================
-@app.on_message(filters.command("testabuse") & filters.private)
-async def test_abuse_system(client, message: Message):
-    """Test the abuse detection system"""
-    
-    test_cases = [
-        "Hello world",
-        "fuck you",
-        "madarchod",
-        "bhenchod",
-        "chutiya",
-        "You are an idiot",
-        "What the shit is this",
-        "f u c k",
-        "sh!t",
-        "b1tch",
-        "f*ck you",
-        "@sshole"
-    ]
-    
-    results = []
-    for text in test_cases:
-        has_abuse, words, severity = detect_abuse(text)
-        status = "✅" if has_abuse else "❌"
-        results.append(f"{status} `{text[:30]}` → Abuse: {has_abuse}, Words: {words[:2]}, Severity: {severity}")
-    
-    results_text = "\n".join(results)
-    
-    await message.reply_text(
-        f"{beautiful_header('moderation')}\n\n"
-        f"🧪 **ABUSE DETECTION TEST**\n\n"
-        f"{results_text}\n\n"
-        f"✅ = Abuse detected\n"
-        f"❌ = No abuse detected"
-        f"{beautiful_footer()}"
-    )
-
-
-# ================= STRIKE STATUS COMMAND =================
-@app.on_message(filters.command(["strikes", "mystrikes"]) & filters.group)
-async def check_strikes_command(client, message: Message):
-    """Check user's strike status"""
-    
-    target_user = message.from_user
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
-    
-    chat_id = message.chat.id
-    user_id = target_user.id
-    
-    # Get strike count
-    strike_count = get_strike_count(user_id, chat_id)
-    
-    # Get next action
-    if strike_count == 0:
-        next_action = "Warning (Strike 1)"
-    elif strike_count == 1:
-        next_action = "6-hour Mute (Strike 2)"
-    elif strike_count == 2:
-        next_action = "Permanent Ban (Strike 3)"
-    else:
-        next_action = "Already at max strikes"
-    
-    status_text = f"""
-{beautiful_header('moderation')}
-
-📊 **STRIKE STATUS**
-
-👤 **User:** {target_user.mention}
-🆔 **ID:** `{user_id}`
-💬 **Chat:** {message.chat.title}
-
-📋 **CURRENT STATUS:**
-• Strikes: {strike_count}/3
-• Next Action: {next_action}
-• System: 3-Strike Auto-Moderation
-
-⚡ **3-STRIKE SYSTEM:**
-❶ **Strike 1:** Warning Only
-❷ **Strike 2:** 6-hour Mute
-❸ **Strike 3:** Permanent Ban
-
-🔄 **RESET RULES:**
-• Strikes reset after 7 days
-• Each new violation adds a strike
-• System is automatic
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_strikes:{user_id}:{chat_id}"),
-            InlineKeyboardButton("📊 Abuse Stats", callback_data=f"abuse_stats:{chat_id}")
-        ]
-    ]
-    
-    await message.reply_text(
-        status_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-# ================= ADMIN NOTIFICATION =================
-async def notify_admins_about_abuse(client, chat_id, user, found_words, action, strike_num):
-    """Notify admins about abuse action"""
-    
-    try:
-        chat = await client.get_chat(chat_id)
-        
-        notification = f"""
-{beautiful_header('moderation')}
-
-🤖 **AUTO-MODERATION ACTION**
-
-{action}
-
-👤 **User:** {user.mention}
-🆔 **ID:** `{user.id}`
-💬 **Chat:** {chat.title}
-📊 **Strike:** {strike_num}/3
-
-🔍 **ABUSE DETECTED:**
-• Words: {', '.join(found_words[:5])}
-• Time: {datetime.now().strftime('%H:%M:%S')}
-• Action: Auto-Moderation System
-"""
-        
-        buttons = [
-            [
-                InlineKeyboardButton("👤 User Info", callback_data=f"userinfo:{user.id}"),
-                InlineKeyboardButton("📊 Strike Status", callback_data=f"strike_status:{user.id}:{chat_id}")
-            ],
-            [
-                InlineKeyboardButton("✅ OK", callback_data="dismiss"),
-                InlineKeyboardButton("📋 Rules", callback_data="group_rules")
-            ]
-        ]
-        
-        # Send to all admins
-        async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER] and not member.user.is_bot:
-                try:
-                    await client.send_message(
-                        member.user.id,
-                        notification + beautiful_footer(),
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                except:
-                    continue
-                    
-    except Exception as e:
-        print(f"Error notifying admins: {e}")
-
-
-# ================= ADMIN PROMOTION SYSTEM =================
-# ================= PROMOTE COMMAND (FIXED VERSION) =================
 # ================= ADMIN PROMOTION SYSTEM (COMPLETE) =================
+from pyrogram import filters
+from pyrogram.types import Message, ChatPrivileges
+from pyrogram.enums import ChatMemberStatus
 
-@app.on_message(filters.command(["promote", "bpromote"]) & filters.group)
-async def complete_promote_command(client, message: Message):
-    """
-    Complete promotion command with all 3 methods
-    Supports bot admins and group admins
-    """
-    
-    # Extract command info
-    command_type = message.command[0]
-    is_bot_command = command_type == "bpromote"
-    
-    # Check admin type
-    is_bot_admin, is_group_admin, admin_type = await check_admin_type(
-        client, message.chat.id, message.from_user.id
-    )
-    
-    # Permission validation
-    if is_bot_command and not is_bot_admin:
+@app.on_message(filters.command("promote") & filters.group)
+async def promote_command(client, message: Message):
+    chat_id = message.chat.id
+    caller = message.from_user
+    caller_id = caller.id
+
+    # ================= CALLER STATUS =================
+    member = await client.get_chat_member(chat_id, caller_id)
+
+    is_owner = member.status == ChatMemberStatus.OWNER
+    is_group_admin = member.status == ChatMemberStatus.ADMINISTRATOR
+    is_bot_admin_user = is_admin(caller_id)  # bot / super admin
+
+    if not (is_owner or is_group_admin or is_bot_admin_user):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Admin Required**\n"
-            "Use `/mybotadmin` to check your status."
-            + beautiful_footer()
+            "❌ **Only admins can promote members**"
+            f"{beautiful_footer()}"
         )
         return
-    
-    if not is_bot_command and not (is_group_admin or is_bot_admin):
+
+    # ================= BOT PERMISSION =================
+    bot = await client.get_chat_member(chat_id, "me")
+
+    if bot.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
-            "❌ **Permission Denied**\n"
-            "You need either:\n"
-            "• Group admin with promote permission\n"
-            "• Bot admin privileges"
-            + beautiful_footer()
+            "❌ **Make me admin first**\n"
+            "I need **Add New Admins** permission."
+            f"{beautiful_footer()}"
         )
         return
-    
-    # Check bot permissions
-    if not await can_bot_restrict(client, message.chat.id):
+
+    if hasattr(bot, "privileges") and not bot.privileges.can_promote_members:
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Needs Admin Rights**\n"
-            "Make me admin with 'Add New Admins' permission."
-            + beautiful_footer()
+            "❌ **Bot missing permission**\n"
+            "Enable **Add New Admins**."
+            f"{beautiful_footer()}"
         )
         return
-    
-    # Extract user (3 methods)
-    target_user = None
-    extraction_method = ""
-    
-    # METHOD 1: Reply to message
+
+    # ================= TARGET USER =================
     if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
-        extraction_method = "Reply method"
-        args = message.command[1:]  # Title from command
-    
-    # METHOD 2: Username or User ID
+        target = message.reply_to_message.from_user
+        args = message.command[1:]
     elif len(message.command) > 1:
-        user_arg = message.command[1]
-        args = message.command[2:]  # Title from remaining args
-        
-        try:
-            if user_arg.startswith("@"):
-                target_user = await client.get_users(user_arg[1:])
-                extraction_method = f"Username: @{target_user.username}"
-            elif user_arg.isdigit():
-                target_user = await client.get_users(int(user_arg))
-                extraction_method = f"User ID: {user_arg}"
-            else:
-                await message.reply_text(
-                    f"{beautiful_header('admin')}\n\n"
-                    "❌ **Invalid Format**\n\n"
-                    "**Valid formats:**\n"
-                    "1. `/promote @username [title]`\n"
-                    "2. `/promote 1234567890 [title]`\n"
-                    "3. Reply to user + `/promote [title]`"
-                    + beautiful_footer()
-                )
-                return
-        except Exception as e:
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                f"❌ **User Not Found**\nError: {str(e)[:100]}"
-                + beautiful_footer()
-            )
-            return
+        target = await client.get_users(message.command[1])
+        args = message.command[2:]
     else:
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
             "❌ **Usage:**\n"
-            "• `/promote @username [title]`\n"
-            "• `/promote 1234567890 [title]`\n"
-            "• Reply to user + `/promote [title]`"
-            + beautiful_footer()
+            "`/tpromote @user [title]`\n"
+            "or reply + `/tpromote [title]`"
+            f"{beautiful_footer()}"
         )
         return
-    
-    # Check if user exists
-    if not target_user:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **User Not Found**"
-            + beautiful_footer()
-        )
+
+    if target.id == caller_id:
+        await message.reply_text("❌ You cannot promote yourself")
         return
-    
-    # Prevent self-promotion
-    if target_user.id == message.from_user.id:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "😂 **Cannot Promote Yourself**"
-            + beautiful_footer()
-        )
+
+    if target.is_bot:
+        await message.reply_text("❌ Bots cannot be promoted")
         return
-    
-    # Check if user is already admin
-    try:
-        member = await client.get_chat_member(message.chat.id, target_user.id)
-        if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            current_title = getattr(member, 'custom_title', 'Admin')
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                f"⚠️ **Already Admin**\n"
-                f"{target_user.mention} is already {member.status.value}\n"
-                f"🏷️ Title: {current_title}"
-                + beautiful_footer()
-            )
-            return
-    except:
-        pass
-    
-    # Get title (default or provided)
+
+    target_member = await client.get_chat_member(chat_id, target.id)
+    if target_member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        await message.reply_text("⚠️ User is already an admin")
+        return
+
+    # ================= ADMIN TITLE =================
     title = "Admin"
-    if 'args' in locals() and args:
-        title = " ".join(args)[:16]  # Max 16 characters
-    
-    # Determine admin type for promotion message
-    promoter_type = "Bot Admin" if is_bot_admin else "Group Admin"
-    
-    # Set privileges based on admin type
-    if is_bot_admin:
-        # Bot admin privileges
+    if args:
+        title = " ".join(args)[:16]  # Telegram limit = 16 chars
+
+    # ================= PRIVILEGES =================
+    if is_owner or is_bot_admin_user:
+        # 🔥 FULL ADMIN
+        privileges = ChatPrivileges(
+            can_delete_messages=True,
+            can_restrict_members=True,
+            can_invite_users=True,
+            can_pin_messages=True,
+            can_manage_video_chats=True,
+            can_promote_members=True,
+            can_change_info=True,
+            can_manage_chat=True,
+            is_anonymous=False
+        )
+        promoter_type = "Owner" if is_owner else "Bot Admin"
+    else:
+        # 🔧 LIMITED ADMIN (GROUP ADMIN)
         privileges = ChatPrivileges(
             can_delete_messages=True,
             can_restrict_members=True,
@@ -6026,462 +5617,82 @@ async def complete_promote_command(client, message: Message):
             can_manage_video_chats=True,
             can_promote_members=False,
             can_change_info=False,
-            can_post_messages=True,
-            can_edit_messages=True,
-            can_manage_chat=True,
+            can_manage_chat=False,
             is_anonymous=False
         )
-    else:
-        # Check if promoter is owner
-        try:
-            promoter = await client.get_chat_member(message.chat.id, message.from_user.id)
-            if promoter.status == ChatMemberStatus.OWNER:
-                # Owner can give all permissions
-                privileges = ChatPrivileges(
-                    can_delete_messages=True,
-                    can_restrict_members=True,
-                    can_invite_users=True,
-                    can_pin_messages=True,
-                    can_manage_video_chats=True,
-                    can_promote_members=True,
-                    can_change_info=True,
-                    can_post_messages=True,
-                    can_edit_messages=True,
-                    can_manage_chat=True,
-                    is_anonymous=False
-                )
-            else:
-                # Regular admin - limited permissions
-                privileges = ChatPrivileges(
-                    can_delete_messages=True,
-                    can_restrict_members=True,
-                    can_invite_users=True,
-                    can_pin_messages=True,
-                    can_manage_video_chats=True,
-                    can_promote_members=False,
-                    can_change_info=False,
-                    can_post_messages=True,
-                    can_edit_messages=True,
-                    can_manage_chat=True,
-                    is_anonymous=False
-                )
-        except:
-            privileges = ChatPrivileges(
-                can_delete_messages=True,
-                can_restrict_members=True,
-                can_invite_users=True,
-                can_pin_messages=True,
-                can_manage_video_chats=True,
-                can_promote_members=False,
-                can_change_info=False,
-                is_anonymous=False
-            )
-    
-    # Execute promotion
+        promoter_type = "Group Admin"
+
+    # ================= PROMOTE =================
+    await client.promote_chat_member(chat_id, target.id, privileges)
+
+    # ================= SET ADMIN TITLE =================
     try:
-        await client.promote_chat_member(
-            chat_id=message.chat.id,
-            user_id=target_user.id,
-            privileges=privileges
-        )
-        
-        # Set custom title
-        try:
-            await client.set_administrator_title(
-                chat_id=message.chat.id,
-                user_id=target_user.id,
-                title=title
-            )
-        except:
-            pass  # Title is optional
-        
-        # Send success message
-        success_msg = f"""
-{beautiful_header('admin')}
-
-✅ **PROMOTION SUCCESSFUL**
-
-👤 **User:** {target_user.mention}
-🆔 **ID:** `{target_user.id}`
-🏷️ **Title:** {title}
-🔧 **Promoted by:** {message.from_user.mention} ({promoter_type})
-📋 **Method:** {extraction_method}
-
-🔧 **Permissions Granted:**
-• 🗑️ Delete messages
-• 🔇 Restrict members  
-• 👥 Invite users
-• 📌 Pin messages
-• 🎥 Manage video chats
-"""
-        
-        if privileges.can_promote_members:
-            success_msg += "• 👑 **Can promote others** (Full admin)\n"
-        
-        if privileges.can_change_info:
-            success_msg += "• ℹ️ Change group info\n"
-        
-        # Create action buttons
-        buttons = [
-            [
-                InlineKeyboardButton("📉 Demote", callback_data=f"demote:{target_user.id}:{message.chat.id}"),
-                InlineKeyboardButton("👤 Info", callback_data=f"userinfo:{target_user.id}")
-            ],
-            [
-                InlineKeyboardButton("📋 Copy ID", callback_data=f"copyid:{target_user.id}"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="refresh")
-            ]
-        ]
-        
-        promo_message = await message.reply_text(
-            success_msg + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-        # Notify promoted user
-        try:
-            await client.send_message(
-                target_user.id,
-                f"{beautiful_header('admin')}\n\n"
-                f"🎉 **Congratulations!**\n\n"
-                f"You've been promoted in **{message.chat.title}**\n\n"
-                f"🏷️ **Title:** {title}\n"
-                f"👑 **By:** {message.from_user.mention}\n"
-                f"💬 **Group:** {message.chat.title}\n\n"
-                f"Use your powers responsibly! 🛡️"
-                + beautiful_footer()
-            )
-        except:
-            pass  # User might have DMs closed
-        
-        # Log the promotion
-        cur.execute(
-            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (message.chat.id, target_user.id, f"Promoted as {title} by {message.from_user.id}")
-        )
-        conn.commit()
-        
-        # Ask for duration if bot admin
-        if is_bot_admin:
-            duration_buttons = [
-                [
-                    InlineKeyboardButton("1 Hour", callback_data=f"set_duration:{target_user.id}:{message.chat.id}:{promo_message.id}:1h"),
-                    InlineKeyboardButton("6 Hours", callback_data=f"set_duration:{target_user.id}:{message.chat.id}:{promo_message.id}:6h")
-                ],
-                [
-                    InlineKeyboardButton("1 Day", callback_data=f"set_duration:{target_user.id}:{message.chat.id}:{promo_message.id}:1d"),
-                    InlineKeyboardButton("1 Week", callback_data=f"set_duration:{target_user.id}:{message.chat.id}:{promo_message.id}:7d")
-                ],
-                [
-                    InlineKeyboardButton("⏳ Permanent", callback_data=f"set_duration:{target_user.id}:{message.chat.id}:{promo_message.id}:permanent"),
-                    InlineKeyboardButton("❌ No Duration", callback_data="no_duration")
-                ]
-            ]
-            
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                f"⏰ **Set Promotion Duration**\n\n"
-                f"Select how long {target_user.mention} should remain admin:\n"
-                f"(Bot admins can set temporary promotions)"
-                + beautiful_footer(),
-                reply_markup=InlineKeyboardMarkup(duration_buttons)
-            )
-        
-    except Exception as e:
-        error_msg = str(e)
-        if "USER_NOT_PARTICIPANT" in error_msg:
-            error_msg = "User is not in this group"
-        elif "CHAT_ADMIN_REQUIRED" in error_msg:
-            error_msg = "Bot needs 'Add New Admins' permission"
-        elif "ADMINS_TOO_MUCH" in error_msg:
-            error_msg = "Too many admins (max 50)"
-        
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            f"❌ **Promotion Failed**\n\n"
-            f"**Error:** {error_msg}\n\n"
-            f"**User:** {target_user.mention}\n"
-            f"**Method:** {extraction_method}"
-            + beautiful_footer()
-        )
-
-
-# ================= DURATION SETTING CALLBACK =================
-@app.on_callback_query(filters.regex("^set_duration:"))
-async def set_promotion_duration_callback(client, cq):
-    """Set promotion duration for temporary admin"""
-    
-    if not is_admin(cq.from_user.id):
-        await cq.answer("❌ Bot admins only!", show_alert=True)
-        return
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        message_id = int(parts[3])
-        duration_str = parts[4]
-        
-        user = await client.get_users(user_id)
-        chat = await client.get_chat(chat_id)
-        
-        if duration_str == "permanent":
-            duration = None
-            duration_text = "Permanent"
-        else:
-            duration = parse_duration(duration_str)
-            duration_text = duration_str
-        
-        # Update promotion message
-        try:
-            promo_msg = await client.get_messages(chat_id, message_id)
-            new_text = promo_msg.text + f"\n\n⏰ **Duration:** {duration_text}"
-            await promo_msg.edit_text(new_text)
-        except:
-            pass
-        
-        # Schedule auto-demote if duration is set
-        if duration:
-            asyncio.create_task(auto_demote_after_duration(
-                client, chat_id, user_id, duration, message_id
-            ))
-        
-        # Send confirmation
-        await cq.message.edit_text(
-            f"{beautiful_header('admin')}\n\n"
-            f"⏰ **Duration Set Successfully**\n\n"
-            f"👤 **User:** {user.mention}\n"
-            f"💬 **Group:** {chat.title}\n"
-            f"⏳ **Duration:** {duration_text}\n\n"
-            f"✅ User will be auto-demoted after {duration_text if duration_text != 'Permanent' else 'never'}."
-            + beautiful_footer()
-        )
-        
-        await cq.answer(f"Duration set to {duration_text}")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-# ================= AUTO-DEMOTE FUNCTION =================
-async def auto_demote_after_duration(client, chat_id, user_id, duration, promotion_msg_id):
-    """Auto-demote user after promotion duration expires"""
-    try:
-        # Wait for duration
-        await asyncio.sleep(duration.total_seconds())
-        
-        # Demote user
-        await client.promote_chat_member(
+        await client.set_administrator_title(
             chat_id=chat_id,
-            user_id=user_id,
-            privileges=ChatPrivileges()  # Remove all privileges
+            user_id=target.id,
+            title=title
         )
-        
-        # Update promotion message
-        try:
-            await client.edit_message_text(
-                chat_id=chat_id,
-                message_id=promotion_msg_id,
-                text=f"⏰ **Promotion expired** - {await client.get_users(user_id)} has been auto-demoted"
-            )
-        except:
-            pass
-        
-        # Notify user
-        try:
-            await client.send_message(
-                user_id,
-                f"{beautiful_header('admin')}\n\n"
-                f"⏰ **Promotion Period Ended**\n\n"
-                f"Your admin role in **{await client.get_chat(chat_id).title}** has expired.\n"
-                f"You are now a regular member again.\n\n"
-                f"Thank you for your service! 👏"
-                + beautiful_footer()
-            )
-        except:
-            pass
-        
-        # Log auto-demotion
-        cur.execute(
-            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (chat_id, user_id, "Auto-demoted after promotion duration")
-        )
-        conn.commit()
-        
     except Exception as e:
-        print(f"Auto-demote error: {e}")
+        print(f"Admin title set failed: {e}")
 
-
-# ================= DEMOTE COMMAND (ALL 3 METHODS) =================
-@app.on_message(filters.command(["demote", "bdemote"]) & filters.group)
-async def complete_demote_command(client, message: Message):
-    """
-    Complete demote command supporting all 3 methods
-    Works for both bot admins and group admins
-    """
-    
-    # Check admin type
-    is_bot_admin, is_group_admin, admin_type = await check_admin_type(
-        client, message.chat.id, message.from_user.id
+    # ================= SUCCESS MESSAGE =================
+    await message.reply_text(
+        f"{beautiful_header('admin')}\n\n"
+        "✅ **PROMOTED SUCCESSFULLY**\n\n"
+        f"👤 **User:** {target.mention}\n"
+        f"🏷️ **Title:** {title}\n"
+        f"🔧 **By:** {caller.mention} ({promoter_type})"
+        f"{beautiful_footer()}"
     )
-    
-    command_type = message.command[0]
-    is_bot_command = command_type == "bdemote"
-    
-    # Permission validation
-    if is_bot_command and not is_bot_admin:
+
+@app.on_message(filters.command("demote") & filters.group)
+async def demote_command(client, message: Message):
+    chat_id = message.chat.id
+    caller = message.from_user
+    caller_id = caller.id
+
+    is_bot_admin_user = is_admin(caller_id)
+    member = await client.get_chat_member(chat_id, caller_id)
+    is_owner = member.status == ChatMemberStatus.OWNER
+
+    if not (is_owner or is_bot_admin_user):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Admin Required**"
-            + beautiful_footer()
+            "❌ **Only Group Owner or Bot Admin can demote admins**"
+            f"{beautiful_footer()}"
         )
         return
-    
-    if not is_bot_command and not (is_group_admin or is_bot_admin):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Permission Denied**"
-            + beautiful_footer()
-        )
-        return
-    
-    # Check bot permissions
-    if not await can_bot_restrict(client, message.chat.id):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Needs Admin Rights**"
-            + beautiful_footer()
-        )
-        return
-    
-    # Extract user (3 methods)
-    target_user = None
-    extraction_method = ""
-    
-    # METHOD 1: Reply to message
+
+    # ===== GET TARGET =====
     if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
-        extraction_method = "Reply method"
-    
-    # METHOD 2: Username or User ID
+        target = message.reply_to_message.from_user
     elif len(message.command) > 1:
-        user_arg = message.command[1]
-        
-        try:
-            if user_arg.startswith("@"):
-                target_user = await client.get_users(user_arg[1:])
-                extraction_method = f"Username: @{target_user.username}"
-            elif user_arg.isdigit():
-                target_user = await client.get_users(int(user_arg))
-                extraction_method = f"User ID: {user_arg}"
-            else:
-                await message.reply_text(
-                    f"{beautiful_header('admin')}\n\n"
-                    "❌ **Invalid Format**\n\n"
-                    "**Valid formats:**\n"
-                    "1. `/demote @username`\n"
-                    "2. `/demote 1234567890`\n"
-                    "3. Reply to user + `/demote`"
-                    + beautiful_footer()
-                )
-                return
-        except:
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                f"❌ **User Not Found**\n`{user_arg}`"
-                + beautiful_footer()
-            )
-            return
+        target = await client.get_users(message.command[1])
     else:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Usage:**\n"
-            "1. `/demote @username`\n"
-            "2. `/demote 1234567890`\n"
-            "3. Reply to user + `/demote`"
-            + beautiful_footer()
-        )
-        return
-    
-    # Check target status
-    try:
-        target_member = await client.get_chat_member(message.chat.id, target_user.id)
-        
-        if target_member.status == ChatMemberStatus.OWNER:
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                "❌ **Cannot Demote Owner**"
-                + beautiful_footer()
-            )
-            return
-        
-        if target_member.status != ChatMemberStatus.ADMINISTRATOR:
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                f"ℹ️ **Not an Admin**\n"
-                f"{target_user.mention} is not an admin."
-                + beautiful_footer()
-            )
-            return
-        
-    except:
-        pass
-    
-    # Execute demotion
-    try:
-        await client.promote_chat_member(
-            chat_id=message.chat.id,
-            user_id=target_user.id,
-            privileges=ChatPrivileges()  # Remove all privileges
-        )
-        
-        # Get promoter type
-        promoter_type = "Bot Admin" if is_bot_admin else "Group Admin"
-        
-        demotion_msg = f"""
-{beautiful_header('admin')}
+        return await message.reply_text("❌ Reply or use `/demote @user`")
 
-📉 **ADMIN DEMOTED**
+    target_member = await client.get_chat_member(chat_id, target.id)
 
-👤 **User:** {target_user.mention}
-🆔 **ID:** `{target_user.id}`
-🔧 **By:** {message.from_user.mention} ({promoter_type})
-📋 **Method:** {extraction_method}
+    if target_member.status == ChatMemberStatus.OWNER:
+        return await message.reply_text("❌ Cannot demote group owner")
 
-✅ All admin permissions removed
-👤 User is now a regular member
-"""
-        
-        await message.reply_text(demotion_msg + beautiful_footer())
-        
-        # Notify demoted user
-        try:
-            await client.send_message(
-                target_user.id,
-                f"{beautiful_header('admin')}\n\n"
-                f"📉 **Admin Role Removed**\n\n"
-                f"Your admin role in **{message.chat.title}** has been removed.\n\n"
-                f"🔧 **By:** {message.from_user.mention}\n"
-                f"💬 **Group:** {message.chat.title}\n\n"
-                f"You are now a regular member."
-                + beautiful_footer()
-            )
-        except:
-            pass
-        
-        # Log demotion
-        cur.execute(
-            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (message.chat.id, target_user.id, f"Demoted by {message.from_user.id}")
-        )
-        conn.commit()
-        
-    except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            f"❌ **Demotion Failed**\n`{str(e)[:100]}`"
-            + beautiful_footer()
-        )
+    if target_member.status != ChatMemberStatus.ADMINISTRATOR:
+        return await message.reply_text("⚠️ User is not admin")
+
+    # ===== DEMOTE =====
+    await client.promote_chat_member(
+        chat_id,
+        target.id,
+        privileges=ChatPrivileges()  # remove admin
+    )
+
+    await message.reply_text(
+        f"{beautiful_header('admin')}\n\n"
+        "🔻 **ADMIN REMOVED**\n\n"
+        f"👤 User: {target.mention}\n"
+        f"🔧 By: {caller.mention}"
+        f"{beautiful_footer()}"
+    )
 
 # ================= ADMIN LIST COMMAND =================
 @app.on_message(filters.command("admins") & filters.group)
@@ -9921,9 +9132,104 @@ async def health_check(client, message: Message):
         f"{beautiful_footer()}"
     )
 
+
+
+
+@app.on_message(filters.new_chat_members & filters.group)
+async def welcome_handler(client, message: Message):
+    for user in message.new_chat_members:
+
+        # ================= BOT JOIN =================
+        if user.is_bot:
+            bot_welcome = f"""
+{beautiful_header('welcome')}
+
+🤖 **Bot Added Successfully!**
+
+👋 Welcome {user.mention}
+
+🔧 This bot is now part of **{message.chat.title}**
+
+📌 **Next Steps**
+• Promote the bot as admin
+• Give required permissions
+• Use `/help` to see commands
+
+⚡ Make sure permissions are set correctly!
+"""
+            await message.reply_text(bot_welcome + beautiful_footer())
+            continue
+
+        # ================= HUMAN JOIN =================
+        member_welcome = f"""
+{beautiful_header('welcome')}
+
+🌸 **Welcome to {message.chat.title}!** 🌸
+
+👋 Hey {user.mention},
+We’re happy to have you here 😊
+
+📌 **Your Info**
+• 🆔 ID: `{user.id}`
+• 👤 Name: {user.first_name or 'User'}
+• 🔗 Username: @{user.username if user.username else 'Not set'}
+
+📜 **Group Rules**
+• Be respectful 🤝  
+• No spam or abuse 🚫  
+• Follow admin instructions 👮  
+
+💬 **Tip:**  
+Say hi and enjoy chatting with everyone!
+
+✨ Have a great time here!
+"""
+        await message.reply_text(member_welcome + beautiful_footer())
+
+
 # ================= SUPPORT SYSTEM =================
+def admin_buttons(uid):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🟢 Reply", callback_data=f"reply:{uid}"),
+            InlineKeyboardButton("🚫 Block", callback_data=f"block:{uid}")
+        ],
+        [
+            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock:{uid}"),
+            InlineKeyboardButton("📜 History", callback_data=f"history:{uid}")
+        ]
+    ])
+
+
+@app.on_callback_query(filters.regex("^rules$"))
+async def rules_cb(client, cq):
+    await cq.answer()
+    await cq.message.reply_text(
+        f"{beautiful_header('rules')}\n\n"
+        "📜 **Support Rules**\n\n"
+        "✅ Respectful language ka use karein\n"
+        "❌ Abuse bilkul allowed nahi\n"
+        "🚫 Repeat violation par block\n"
+        "⏳ Thoda patience rakhein\n\n"
+        "🙏 Dhanyavaad"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_callback_query(filters.regex("^contact_support$"))
+async def contact_support_cb(client, cq):
+    await cq.answer()
+    await cq.message.reply_text(
+        f"{beautiful_header('support')}\n\n"
+        "📩 **Contact Support**\n\n"
+        "Bas apna message likhiye ✍️\n"
+        "Support team jald reply karegi 😊"
+        f"{beautiful_footer()}"
+    )
+
+
 @app.on_message(filters.private, group=1)
 async def user_handler(client, message: Message):
+
     if message.from_user.is_bot:
         return
 
@@ -9936,16 +9242,16 @@ async def user_handler(client, message: Message):
     # ---------- BLOCK CHECK ----------
     if is_blocked(uid):
         await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
+            f"{beautiful_header('alert')}\n\n"
             "🔴 **Access Blocked**\n"
             "Aap admin dwara block kiye gaye hain."
-            + beautiful_footer()
+            f"{beautiful_footer()}"
         )
         return
 
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
-    if abuse_text and contains_abuse_enhanced(abuse_text):
+    if abuse_text and contains_abuse(abuse_text):
         count = abuse_warning(uid)
 
         if count >= 2:
@@ -9956,18 +9262,18 @@ async def user_handler(client, message: Message):
             conn.commit()
 
             await message.reply_text(
-                f"{beautiful_header('support')}\n\n"
+                f"{beautiful_header('alert')}\n\n"
                 "🔴 **Blocked**\n"
                 "Repeated abusive language detected."
-                + beautiful_footer()
+                f"{beautiful_footer()}"
             )
             return
         else:
             await message.reply_text(
-                f"{beautiful_header('support')}\n\n"
+                f"{beautiful_header('warning')}\n\n"
                 "⚠️ **Warning**\n"
                 "Abusive language detected. Please behave."
-                + beautiful_footer()
+                f"{beautiful_footer()}"
             )
             return
 
@@ -9981,7 +9287,7 @@ async def user_handler(client, message: Message):
             "📨 **Message Received!**\n"
             "Thanks for contacting us ✨\n"
             "Our **Ankit Shakya** will reply shortly ⏳"
-            + beautiful_footer()
+            f"{beautiful_footer()}"
         )
         cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
         conn.commit()
@@ -9989,39 +9295,139 @@ async def user_handler(client, message: Message):
         await message.reply_text(
             f"{beautiful_header('support')}\n\n"
             "✅ **Message received**"
-            + beautiful_footer()
+            f"{beautiful_footer()}"
         )
 
     # ---------- FORWARD USER MESSAGE TO ADMINS ----------
     cur.execute("SELECT admin_id FROM admins")
     admins = cur.fetchall()
 
-    header = f"""
-{beautiful_header('support')}
-
-📩 **New User Message**
-
-👤 **Name:** {message.from_user.first_name}
-🆔 **ID:** `{uid}`
-📛 **Username:** @{message.from_user.username or 'None'}
-    """
+    admin_header = (
+        f"{beautiful_header('support')}\n\n"
+        "📩 **New User Message**\n\n"
+        f"👤 Name: {message.from_user.first_name}\n"
+        f"🆔 ID: `{uid}`\n"
+        f"👤 Username: @{message.from_user.username or 'None'}\n\n"
+    )
 
     for (aid,) in admins:
         try:
             if message.text:
                 await client.send_message(
                     aid,
-                    f"{header}\n\n💬 **Message:** {message.text}",
+                    f"{admin_header}💬 {message.text}{beautiful_footer()}",
                     reply_markup=admin_buttons(uid)
                 )
             else:
                 await message.copy(
                     aid,
-                    caption=header,
+                    caption=f"{admin_header}{beautiful_footer()}",
                     reply_markup=admin_buttons(uid)
                 )
         except:
             continue
+
+@app.on_callback_query(filters.regex("^reply:"))
+async def cb_reply(client, cq):
+
+    if cq.from_user.is_bot:
+        return
+
+    admin_id = cq.from_user.id
+
+    if not is_admin(admin_id):
+        await cq.answer("Not allowed", show_alert=True)
+        return
+
+    try:
+        user_id = int(cq.data.split(":")[1])
+    except:
+        await cq.answer("Invalid target", show_alert=True)
+        return
+
+    cur.execute(
+        "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
+        (admin_id, user_id)
+    )
+    conn.commit()
+
+    await cq.message.reply_text(
+        f"{beautiful_header('support')}\n\n"
+        "✍️ **Reply Mode ON**\n\n"
+        "Ab aap apna message (text / photo / video / document / voice) bhejein.\n"
+        "Agla message **direct user ko** jayega ✅"
+        f"{beautiful_footer()}"
+    )
+
+    await cq.answer("Reply mode enabled ✅")
+
+# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
+
+@app.on_message(filters.private, group=0)
+async def admin_reply_handler(client, message: Message):
+
+    if message.from_user.is_bot:
+        return
+
+    admin_id = message.from_user.id
+
+    if not is_admin(admin_id):
+        return
+
+    cur.execute(
+        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    row = cur.fetchone()
+
+    if not row:
+        return
+
+    user_id = row[0]
+
+    # Clear reply mode first
+    cur.execute(
+        "DELETE FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    conn.commit()
+
+    try:
+        if message.text:
+            await client.send_message(
+                user_id,
+                f"{beautiful_header('support')}\n\n"
+                f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}"
+                f"{beautiful_footer()}"
+            )
+            mtype, content = "text", message.text
+        else:
+            await message.copy(user_id)
+            mtype, content = "media", "MEDIA"
+
+        cur.execute(
+            """
+            INSERT INTO contact_history
+            (user_id, sender, message_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, "admin", mtype, content)
+        )
+        conn.commit()
+
+        await message.reply_text(
+            f"{beautiful_header('support')}\n\n"
+            "✅ Reply sent to user"
+            f"{beautiful_footer()}"
+        )
+
+    except Exception as e:
+        await message.reply_text(
+            f"{beautiful_header('alert')}\n\n"
+            f"❌ Failed to send reply\n`{e}`"
+            f"{beautiful_footer()}"
+        )
+
 
 # ================= START BACKGROUND TASKS =================
 # Update your start_background_tasks function
