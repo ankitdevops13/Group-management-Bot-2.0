@@ -8831,7 +8831,17 @@ Say hi and enjoy chatting with everyone!
 """
         await message.reply_text(member_welcome + beautiful_footer())
 
+def abuse_warning(uid):
+    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
+    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    conn.commit()
+    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    return cur.fetchone()[0]
 
+def contains_abuse(text):
+    text = re.sub(r"[^a-zA-Z ]", "", text.lower())
+    return any(w in text for w in ABUSE_WORDS)
+    
 # ================= SUPPORT SYSTEM =================
 def admin_button(uid):
     return InlineKeyboardMarkup([
@@ -8938,12 +8948,12 @@ async def user_handler(client, message: Message):
             conn.commit()
 
             await message.reply_text(
-                footer("🔴 **Blocked**\nRepeated abusive language detected.")
+                beautiful_footer("🔴 **Blocked**\nRepeated abusive language detected.")
             )
             return
         else:
             await message.reply_text(
-                footer("⚠️ **Warning**\nAbusive language detected. Please behave.")
+                beautiful_footer("⚠️ **Warning**\nAbusive language detected. Please behave.")
             )
             return
 
@@ -8954,7 +8964,7 @@ async def user_handler(client, message: Message):
     if first_time:
         # 👉 First message (full reply)
         await message.reply_text(
-            footer(
+            beautiful_footer(
                 "📨 **Message Received!**\n"
                 "Thanks for contacting us ✨\n"
                 "Our **Ankit Shakya** will reply shortly ⏳"
@@ -8965,7 +8975,7 @@ async def user_handler(client, message: Message):
     else:
         # 👉 Other messages (short reply)
         await message.reply_text(
-            footer("✅ **Message received**")
+            beautiful_footer("✅ **Message received**")
         )
 
     # ---------- FORWARD USER MESSAGE TO ADMINS ----------
