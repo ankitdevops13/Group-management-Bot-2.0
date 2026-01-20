@@ -388,6 +388,12 @@ def remove_mute(chat_id, user_id):
     )
     conn.commit()
 
+def contains_abuse(text):
+    if not text:
+        return False
+    text = re.sub(r"[^a-zA-Z ]", "", text.lower())
+    return any(w in text for w in ABUSE_WORDS)
+
 
 # ================= HELPER FUNCTIONS =================
 def is_admin(uid):
