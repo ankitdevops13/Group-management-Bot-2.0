@@ -65,62 +65,93 @@ app = Client(
 )
 
 # ================= DATABASE =================
+
+# ======================================================
+# ================= DATABASE SETUP ======================
+# ======================================================
+
+
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cur = conn.cursor()
 
-# Existing tables
-cur.execute("CREATE TABLE IF NOT EXISTS admins (admin_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS blocked_users (user_id INTEGER PRIMARY KEY)")
+# ======================================================
+# ================== BOT ADMINS ========================
+# ======================================================
 cur.execute("""
-CREATE TABLE IF NOT EXISTS contact_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    sender TEXT,
-    message_type TEXT,
-    content TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS admins (
+    admin_id INTEGER PRIMARY KEY
 )
 """)
-cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
+
+# Super admin (safe insert)
 cur.execute(
-    "CREATE INDEX IF NOT EXISTS idx_abuse_warns ON abuse_warns(chat_id, user_id)"
+    "INSERT OR IGNORE INTO admins (admin_id) VALUES (?)",
+    (SUPER_ADMIN,)
 )
+
+# ======================================================
+# ================= BLOCKED USERS ======================
+# (PM support block)
+# ======================================================
 cur.execute("""
-CREATE TABLE IF NOT EXISTS admin_reply_target (
-    admin_id INTEGER PRIMARY KEY,
-    user_id INTEGER
+CREATE TABLE IF NOT EXISTS blocked_users (
+    user_id INTEGER PRIMARY KEY
 )
 """)
 
-cur.execute("CREATE TABLE IF NOT EXISTS admins (admin_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS blocked_users (user_id INTEGER PRIMARY KEY)")
+# ======================================================
+# ================= SUPPORT CHAT HISTORY ===============
+# (User ↔ Admin messages)
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS contact_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    sender TEXT,
-    message_type TEXT,
+    sender TEXT,              -- 'user' / 'admin'
+    message_type TEXT,        -- 'text' / 'media'
     content TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
-cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
+
+# ======================================================
+# ================= AUTO REPLY TRACKER =================
+# (First PM auto-reply)
+# ======================================================
+cur.execute("""
+CREATE TABLE IF NOT EXISTS auto_reply_sent (
+    user_id INTEGER PRIMARY KEY
+)
+""")
+
+# ======================================================
+# ================= ADMIN REPLY MODE ===================
+# (Inline support reply target)
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
     user_id INTEGER
 )
 """)
+
+# ======================================================
+# ================= ABUSE / WARN SYSTEM ================
+# (GROUP-WISE — ACTIVE TABLE)
+# ======================================================
 cur.execute("""
-CREATE TABLE IF NOT EXISTS user_warnings (
-    user_id INTEGER PRIMARY KEY,
-    count INTEGER DEFAULT 0
+CREATE TABLE IF NOT EXISTS abuse_warns (
+    chat_id INTEGER,
+    user_id INTEGER,
+    warns INTEGER DEFAULT 0,
+    PRIMARY KEY (chat_id, user_id)
 )
 """)
-conn.commit()
-cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (SUPER_ADMIN,))
 
-
+# ======================================================
+# ================= MUTE SCHEDULER =====================
+# (Auto-unmute)
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS mutes (
     chat_id INTEGER,
@@ -130,17 +161,9 @@ CREATE TABLE IF NOT EXISTS mutes (
 )
 """)
 
-# New tables for management bot
-cur.execute("""
-CREATE TABLE IF NOT EXISTS user_warnings (
-    chat_id INTEGER,
-    user_id INTEGER,
-    reason TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (chat_id, user_id, timestamp)
-)
-""")
-
+# ======================================================
+# ================= GROUP RULES ========================
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS group_rules (
     chat_id INTEGER PRIMARY KEY,
@@ -148,12 +171,19 @@ CREATE TABLE IF NOT EXISTS group_rules (
 )
 """)
 
+# ======================================================
+# ================= WELCOME MESSAGES ===================
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS welcome_messages (
     chat_id INTEGER PRIMARY KEY,
     message TEXT
 )
 """)
+
+# ======================================================
+# ================= USER REPORT SYSTEM =================
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS user_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +191,7 @@ CREATE TABLE IF NOT EXISTS user_reports (
     reporter_id INTEGER,
     reported_user_id INTEGER,
     reason TEXT,
-    status TEXT DEFAULT 'pending',  -- pending, resolved, rejected
+    status TEXT DEFAULT 'pending',   -- pending / resolved / rejected
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     resolved_by INTEGER,
     resolved_at DATETIME
@@ -177,6 +207,9 @@ CREATE TABLE IF NOT EXISTS report_cooldown (
 )
 """)
 
+# ======================================================
+# ================= REMINDERS ==========================
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +220,10 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
-# Add to your existing table creations
+
+# ======================================================
+# ================= MASS DELETE CONFIRM ================
+# ======================================================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS mass_delete_pending (
     chat_id INTEGER,
@@ -197,11 +233,44 @@ CREATE TABLE IF NOT EXISTS mass_delete_pending (
     PRIMARY KEY (chat_id, admin_id)
 )
 """)
-# Add after table creation
-cur.execute("CREATE INDEX IF NOT EXISTS idx_user_warnings ON user_warnings(chat_id, user_id)")
-cur.execute("CREATE INDEX IF NOT EXISTS idx_admins ON admins(admin_id)")
-cur.execute("CREATE INDEX IF NOT EXISTS idx_reports ON user_reports(chat_id, status)")
+
+# ======================================================
+# ================= INDEXES =============================
+# ======================================================
+cur.execute("""
+CREATE INDEX IF NOT EXISTS idx_admins
+ON admins(admin_id)
+""")
+
+cur.execute("""
+CREATE INDEX IF NOT EXISTS idx_abuse_warns
+ON abuse_warns(chat_id, user_id)
+""")
+
+cur.execute("""
+CREATE INDEX IF NOT EXISTS idx_reports
+ON user_reports(chat_id, status)
+""")
+
+# ======================================================
+# ================= CLEAN OLD / UNUSED =================
+# (IMPORTANT — must NOT be used anywhere)
+# ======================================================
+cur.execute("DROP TABLE IF EXISTS user_warnings")
+cur.execute("DROP TABLE IF EXISTS abuse_warnings")
+# ================= INSERT INITIAL ADMINS =================
+for admin_id in INITIAL_ADMINS:
+    cur.execute(
+        "INSERT OR IGNORE INTO admins (admin_id) VALUES (?)",
+        (admin_id,)
+    )
+
+
+# ======================================================
+# ================= FINAL COMMIT =======================
+# ======================================================
 conn.commit()
+
 
 # ================= INITIALIZE ADMINS FROM CONFIG =================
 def initialize_admins():
