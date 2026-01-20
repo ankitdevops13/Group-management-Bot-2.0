@@ -244,6 +244,19 @@ CREATE TABLE IF NOT EXISTS mass_delete_pending (
 )
 """)
 
+# =========================== admin mention ==========================================
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS admin_ping_cooldown (
+    chat_id INTEGER,
+    user_id INTEGER,
+    last_ping INTEGER,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+conn.commit()
+
+
 # ======================================================
 # Tag cooldown
 cur.execute("""
@@ -7243,8 +7256,17 @@ async def cleanup_abuse_cache_task():
 
             
 # ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =================
-ADMIN_KEYWORDS = ("@admin", "@admins")
+
 ADMIN_PING_COOLDOWN = 120  # seconds
+
+ADMIN_KEYWORDS = [
+    "admin", "admins", "moderator", "mod", "help", "support", "report"
+]
+
+ADMIN_KEYWORD_REGEX = re.compile(
+    r"\b(" + "|".join(map(re.escape, ADMIN_KEYWORDS)) + r")\b",
+    re.IGNORECASE
+)
 
 
 @app.on_message(filters.group & (filters.text | filters.caption))
@@ -7255,14 +7277,15 @@ async def admin_keyword_detector(client, message: Message):
 
     text = (message.text or message.caption or "").lower()
 
-    if not any(k in text for k in ADMIN_KEYWORDS):
+    # ❌ No keyword → exit
+    if not ADMIN_KEYWORD_REGEX.search(text):
         return
 
     chat_id = message.chat.id
     user_id = message.from_user.id
     now = int(time.time())
 
-    # ---------- COOLDOWN CHECK ----------
+    # ---------- COOLDOWN ----------
     cur.execute(
         "SELECT last_ping FROM admin_ping_cooldown WHERE chat_id=? AND user_id=?",
         (chat_id, user_id)
@@ -7273,14 +7296,13 @@ async def admin_keyword_detector(client, message: Message):
         return
 
     cur.execute(
-        "INSERT OR REPLACE INTO admin_ping_cooldown (chat_id, user_id, last_ping) VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO admin_ping_cooldown VALUES (?, ?, ?)",
         (chat_id, user_id, now)
     )
     conn.commit()
 
-    # ---------- FETCH ADMINS (v2 WAY) ----------
+    # ---------- FETCH ADMINS ----------
     admin_mentions = []
-
     async for member in client.get_chat_members(chat_id, filter="administrators"):
         if member.status in (
             ChatMemberStatus.ADMINISTRATOR,
@@ -7290,16 +7312,22 @@ async def admin_keyword_detector(client, message: Message):
 
     admin_mentions = " ".join(admin_mentions[:5]) or "Admins"
 
+    # ---------- MESSAGE PREVIEW ----------
+    msg_preview = (message.text or message.caption or "Media")
+    if len(msg_preview) > 100:
+        msg_preview = msg_preview[:100] + "..."
+
     # ---------- USER FEEDBACK ----------
     await message.reply_text(
         f"{beautiful_header('admin')}\n\n"
-        "🚨 **Admin Alert**\n\n"
+        "🚨 **Admin Alert Triggered**\n\n"
         f"👤 **User:** {message.from_user.mention}\n"
-        f"💬 **Message:** {message.text or 'Media'}\n\n"
+        f"💬 **Message:** {msg_preview}\n\n"
         f"👮 **Admins Notified:**\n{admin_mentions}\n\n"
         "✅ **Reported to admins.**"
         f"{beautiful_footer()}"
     )
+
 
 
 # ================= CALLBACK HANDLERS FOR AUTO-REPORT =================
