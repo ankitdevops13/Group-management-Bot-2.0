@@ -15,6 +15,7 @@ from pyrogram.errors import PeerIdInvalid
 from pyrogram.enums import ChatAction, ChatMemberStatus
 from pyrogram.errors import FloodWait
 import time
+from pyrogram.enums import ChatMembersFilter
 import shutil  # For backup system
 # Add ChatPrivileges conditionally
 try:
