@@ -755,104 +755,6 @@ ABUSE_REGEX = re.compile(
     re.IGNORECASE
 )
 
-MUTE_TIME = 600  # 10 minutes
-
-
-@app.on_message(filters.group & filters.text & ~filters.me)
-async def final_auto_abuse_handler(client, message):
-    if not message.from_user:
-        return
-
-    if not ABUSE_REGEX.search(message.text):
-        return
-
-    chat_id = message.chat.id
-    user = message.from_user
-    user_id = user.id
-
-    # ===== IMMUNITY =====
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            return
-    except:
-        pass
-
-    if is_bot_admin(user_id):  # Bot admin / super admin
-        return
-
-    # ===== DELETE ABUSE MESSAGE =====
-    try:
-        await message.delete()
-    except:
-        pass
-
-    # ===== WARN COUNT =====
-    warns = add_warn(chat_id, user_id)
-
-    # ===== ACTIONS =====
-    if warns == 1:
-        await message.reply_text(
-            f"{beautiful_header('WARNING')}\n\n"
-            f"⚠️ **WARNING 1/5**\n"
-            f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🚫 Abuse language is not allowed"
-            f"{beautiful_footer()}"
-        )
-
-    elif warns == 2:
-        await message.reply_text(
-            f"{beautiful_header('WARNING')}\n\n"
-            f"⚠️ **WARNING 2/5**\n"
-            f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🚫 Abuse language is not allowed"
-            f"{beautiful_footer()}"
-        )
-
-    elif warns == 3:
-        await message.reply_text(
-            f"{beautiful_header('WARNING')}\n\n"
-            f"⚠️ **WARNING 2/5**\n"
-            f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🚫 Abuse language is not allowed\n Next Warning As You Mute 🔕"
-            f"{beautiful_footer()}"
-        )
-        
-    elif warns == 4:
-        await client.restrict_chat_member(
-            chat_id,
-            user_id,
-            ChatPermissions(can_send_messages=False),
-            until_date=datetime.now(timezone.utc) + timedelta(seconds=MUTE_TIME)
-        )
-
-        save_mute(chat_id, user_id, MUTE_TIME)
-
-        await message.reply_text(
-            f"{beautiful_header('ABUSE WORDS')}\n\n"
-            f"🔇 **MUTED (10 MINUTES)**\n"
-            f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"❌ Reason: Repeated abuse (4/5)\n Last Warning Other Wise You Ban 🚫"
-            f"{beautiful_footer()}"
-        )
-
-    elif warns >= 5:
-        await client.ban_chat_member(chat_id, user_id)
-        reset_warn(chat_id, user_id)
-
-        await message.reply_text(
-            f"{beautiful_header('ABUSE WORDS')}\n\n"
-            f"🚫 **BANNED**\n"
-            f"👤 {user.mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"❌ Reason: Repeated abuse (5/5)"
-            f"{beautiful_footer()}"
-        )
-
 
 # ================= UNIVERSAL MODERATION COMMAND HANDLER =========
 async def handle_moderation_command(client, message: Message, command_type="mute"):
@@ -3749,5 +3651,102 @@ async def admin_call_detector(client, message):
         )
 
 
+
+MUTE_TIME = 600  # 10 minutes
+
+@app.on_message(filters.group & filters.text & ~filters.me)
+async def final_auto_abuse_handler(client, message):
+    if not message.from_user:
+        return
+
+    if not ABUSE_REGEX.search(message.text):
+        return
+
+    chat_id = message.chat.id
+    user = message.from_user
+    user_id = user.id
+
+    # ===== IMMUNITY =====
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+            return
+    except:
+        pass
+
+    if is_bot_admin(user_id):  # Bot admin / super admin
+        return
+
+    # ===== DELETE ABUSE MESSAGE =====
+    try:
+        await message.delete()
+    except:
+        pass
+
+    # ===== WARN COUNT =====
+    warns = add_warn(chat_id, user_id)
+
+    # ===== ACTIONS =====
+    if warns == 1:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 1/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"🚫 Abuse language is not allowed"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns == 2:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 2/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"🚫 Abuse language is not allowed"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns == 3:
+        await message.reply_text(
+            f"{beautiful_header('WARNING')}\n\n"
+            f"⚠️ **WARNING 2/5**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"🚫 Abuse language is not allowed\n Next Warning As You Mute 🔕"
+            f"{beautiful_footer()}"
+        )
+        
+    elif warns == 4:
+        await client.restrict_chat_member(
+            chat_id,
+            user_id,
+            ChatPermissions(can_send_messages=False),
+            until_date=datetime.now(timezone.utc) + timedelta(seconds=MUTE_TIME)
+        )
+
+        save_mute(chat_id, user_id, MUTE_TIME)
+
+        await message.reply_text(
+            f"{beautiful_header('ABUSE WORDS')}\n\n"
+            f"🔇 **MUTED (10 MINUTES)**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"❌ Reason: Repeated abuse (4/5)\n Last Warning Other Wise You Ban 🚫"
+            f"{beautiful_footer()}"
+        )
+
+    elif warns >= 5:
+        await client.ban_chat_member(chat_id, user_id)
+        reset_warn(chat_id, user_id)
+
+        await message.reply_text(
+            f"{beautiful_header('ABUSE WORDS')}\n\n"
+            f"🚫 **BANNED**\n"
+            f"👤 {user.mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"❌ Reason: Repeated abuse (5/5)"
+            f"{beautiful_footer()}"
+        )
 # ================== RUN ==================
 app.run()
