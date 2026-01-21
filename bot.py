@@ -580,7 +580,9 @@ def abuse_warning(uid):
 
     
 # ================= HELPER FUNCTIONS =================
-def is_admin(uid):
+# ================= FIXED HELPER FUNCTIONS =================
+
+def is_bot_admin(uid):
     """Check if user is bot admin"""
     cur.execute("SELECT 1 FROM admins WHERE admin_id=?", (uid,))
     return cur.fetchone() is not None
@@ -589,9 +591,18 @@ def is_super_admin(uid):
     """Check if user is super admin"""
     return uid == SUPER_ADMIN
 
-def is_blocked(uid):
+def is_blocked_user(uid):
+    """Check if user is blocked from support"""
     cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
     return cur.fetchone() is not None
+
+async def is_group_admin(client, chat_id, user_id):
+    """Check if user is group admin"""
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except:
+        return False
 
 async def can_user_restrict(client, chat_id, user_id):
     """Check if user can restrict members - Fixed version"""
