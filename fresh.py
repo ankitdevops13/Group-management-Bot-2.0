@@ -50,7 +50,8 @@ BOT_BRAND = "Ankit Shakya Support"
 BOT_TAGLINE = "Fast • Secure • Reliable"
 DB_FILE = "support.db"
 
-
+# ================== GLOBAL TAG STOP ==================
+STOP_TAG = set()
 TAG_LIMIT = 5          # per message
 DELAY = 2              # seconds
 COOLDOWN = 120         # seconds
@@ -3478,6 +3479,36 @@ async def notify_admins(client, chat_id):
             text += f"[{m.user.first_name}](tg://user?id={m.user.id})  "
 
     return text
+
+async def get_target_user(client, message: Message):
+    """
+    Returns (user_id, user_object)
+    Priority:
+    1. Reply
+    2. Command argument (@username / user_id)
+    3. Fallback: sender
+    """
+    # Reply se
+    if message.reply_to_message and message.reply_to_message.from_user:
+        user = message.reply_to_message.from_user
+        return user.id, user
+
+    # Command argument se
+    if len(message.command) > 1:
+        arg = message.command[1]
+        try:
+            if arg.startswith("@"):
+                user = await client.get_users(arg)
+            else:
+                user = await client.get_users(int(arg))
+            return user.id, user
+        except:
+            return None, None
+
+    # Fallback: sender
+    user = message.from_user
+    return user.id, user
+    
 # ================== MENTION (NO VISIBLE LINK) ==================
 def mention(user):
     return f"[{user.first_name}](tg://user?id={user.id})"
