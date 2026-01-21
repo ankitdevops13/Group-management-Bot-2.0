@@ -5787,6 +5787,123 @@ PURGE_FAIL_CARD = """
 {reason}
 """
 
+
+PRIVATE_ID_CARD = """
+╔═══════════════════╗
+   🆔 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗜𝗗
+╚═══════════════════╝
+
+👤 **Name:** {name}
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+
+━━━━━━━━━━━━━━━━━━━
+🆔 **Chat ID:** `{chat_id}`
+💬 **Chat Type:** Private
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+
+"""
+
+GROUP_ID_CARD = """
+╔═══════════════════╗
+   🆔 𝗚𝗥𝗢𝗨𝗣 𝗜𝗗
+╚═══════════════════╝
+
+👤 **User Info**
+━━━━━━━━━━━━━━━━━━━
+👤 **Name:** {name}
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+🛡 **Role:** {role}
+
+💬 **Group Info**
+━━━━━━━━━━━━━━━━━━━
+🆔 **Chat ID:** `{chat_id}`
+💬 **Group Name:** {chat_name}
+📢 **Chat Type:** {chat_type}
+
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+
+"""
+
+CHANNEL_ID_CARD = """
+╔═══════════════════╗
+   📢 𝗖𝗛𝗔𝗡𝗡𝗘𝗟 𝗜𝗗
+╚═══════════════════╝
+
+📢 **Channel Info**
+━━━━━━━━━━━━━━━━━━━
+📛 **Name:** {name}
+🆔 **Channel ID:** `{chat_id}`
+👤 **Username:** {username}
+📢 **Type:** Channel
+
+━━━━━━━━━━━━━━━━━━━
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+"""
+
+CHAT_ID_CARD = """
+╔═══════════════════╗
+   🆔 𝗖𝗛𝗔𝗧 𝗜𝗗
+╚═══════════════════╝
+
+💬 **Chat Info**
+━━━━━━━━━━━━━━━━━━━
+📛 **Name:** {name}
+🆔 **Chat ID:** `{chat_id}`
+📢 **Type:** {chat_type}
+
+━━━━━━━━━━━━━━━━━━━
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+"""
+
+MY_ID_CARD_PRIVATE = """
+╔═══════════════════╗
+   🆔 𝗠𝗬 𝗜𝗗 (𝗣𝗥𝗜𝗩𝗔𝗧𝗘)
+╚═══════════════════╝
+
+👤 **Name:** {name}
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+
+━━━━━━━━━━━━━━━━━━━
+🆔 **Chat ID:** `{chat_id}`
+💬 **Chat Type:** Private
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+"""
+
+MY_ID_CARD_GROUP = """
+╔═══════════════════╗
+   🆔 𝗠𝗬 𝗜𝗗 (𝗚𝗥𝗢𝗨𝗣)
+╚═══════════════════╝
+
+👤 **User Info**
+━━━━━━━━━━━━━━━━━━━
+👤 **Name:** {name}
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+🛡 **Role:** {role}
+
+💬 **Group Info**
+━━━━━━━━━━━━━━━━━━━
+🆔 **Chat ID:** `{chat_id}`
+💬 **Group Name:** {chat_name}
+📢 **Chat Type:** {chat_type}
+
+📩 **Message ID:** `{message_id}`
+🕒 **Time:** {time}
+"""
+
+
 def buttons():
     return InlineKeyboardMarkup(
         [[
@@ -5835,13 +5952,13 @@ async def send_normal_tag(client, chat_id, users):
 
 
 # ================== TAG ALL ==================
-@app.on_message(filters.command("tagall") & filters.group)
+@app.on_message(filters.command("tagall","utag","usertag","alltag") & filters.group)
 async def tag_all(client: Client, message: Message):
 
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    if not await is_group_admin(client, chat_id, user_id):
+    if not await gc_admin(client, chat_id, user_id):
         return await message.reply("❌ **Only admin can use this command**")
 
     if is_on_cooldown(user_id):
@@ -5895,18 +6012,11 @@ async def tag_all(client: Client, message: Message):
     )
 
 # ================== TAG ADMINS ==================
-@app.on_message(filters.command("tagadmin") & filters.group)
+@app.on_message(filters.command("tagadmin","atag","admintag") & filters.group)
 async def tag_admins(client, message: Message):
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-
-    async for m in client.get_chat_members(
-        message.chat.id,
-        filter=ChatMembersFilter.ADMINISTRATORS
-    ):
-        # ADMINISTRATORS filter already includes OWNER
-        if m.user and not m.user.is_bot:
-            text += premium_tag(m.user) + "\n"
-
+    async for m in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+        text += premium_tag(m.user) + "\n"
     await message.reply(text, disable_web_page_preview=True)
 
 # ================== STOP ==================
@@ -6074,6 +6184,167 @@ async def bulk_purge(client, message):
     # 🧹 Auto-delete report
     await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
     await report.delete()
+
+
+@app.on_message(filters.command("id"))
+async def id_command(client, message: Message):
+
+    chat = message.chat
+    time_now = datetime.now().strftime("%d %b %Y • %I:%M %p")
+
+    # ================= CHANNEL =================
+    if chat.type == "channel":
+        name = chat.title or "Unnamed Channel"
+        username = f"@{chat.username}" if chat.username else "Not set"
+
+        text = CHANNEL_ID_CARD.format(
+            name=name,
+            chat_id=chat.id,
+            username=username,
+            message_id=message.id,
+            time=time_now
+        )
+
+        return await message.reply(
+            text,
+            disable_web_page_preview=True
+        )
+
+    # ================= PRIVATE / GROUP =================
+    user_id, user = await get_target_user(client, message)
+    if not user:
+        return await message.reply("❌ Unable to fetch user")
+
+    username = f"@{user.username}" if user.username else "Not set"
+    account = "Bot 🤖" if user.is_bot else "User 👤"
+
+    # ===== PRIVATE CHAT =====
+    if chat.type == "private":
+        text = PRIVATE_ID_CARD.format(
+            name=user.first_name,
+            user_id=user_id,
+            username=username,
+            account=account,
+            chat_id=chat.id,
+            message_id=message.id,
+            time=time_now
+        )
+
+        return await message.reply(
+            text,
+            disable_web_page_preview=True
+        )
+
+    # ===== GROUP / SUPERGROUP =====
+    role = "User"
+    try:
+        m = await client.get_chat_member(chat.id, user_id)
+        if m.status == ChatMemberStatus.OWNER:
+            role = "Group Owner 👑"
+        elif m.status == ChatMemberStatus.ADMINISTRATOR:
+            role = "Group Admin 🛡"
+    except:
+        pass
+
+    text = GROUP_ID_CARD.format(
+        name=user.first_name,
+        user_id=user_id,
+        username=username,
+        account=account,
+        role=role,
+        chat_id=chat.id,
+        chat_name=chat.title,
+        chat_type=chat.type,
+        message_id=message.id,
+        time=time_now
+    )
+
+    await message.reply(
+        text,
+        disable_web_page_preview=True
+    )
+
+@app.on_message(filters.command("chatid"))
+async def chat_id_command(client, message: Message):
+
+    chat = message.chat
+    time_now = datetime.now().strftime("%d %b %Y • %I:%M %p")
+
+    # Detect name safely
+    if chat.type == "private":
+        name = message.from_user.first_name
+    else:
+        name = chat.title or "Unnamed Chat"
+
+    text = CHAT_ID_CARD.format(
+        name=name,
+        chat_id=chat.id,
+        chat_type=chat.type,
+        message_id=message.id,
+        time=time_now
+    )
+
+    await message.reply(
+        text,
+        disable_web_page_preview=True
+    )
+
+@app.on_message(filters.command("myid"))
+async def myid_command(client, message: Message):
+
+    user = message.from_user
+    chat = message.chat
+    time_now = datetime.now().strftime("%d %b %Y • %I:%M %p")
+
+    username = f"@{user.username}" if user.username else "Not set"
+    account = "Bot 🤖" if user.is_bot else "User 👤"
+
+    # ================= PRIVATE CHAT =================
+    if chat.type == "private":
+        text = MY_ID_CARD_PRIVATE.format(
+            name=user.first_name,
+            user_id=user.id,
+            username=username,
+            account=account,
+            chat_id=chat.id,
+            message_id=message.id,
+            time=time_now
+        )
+
+        return await message.reply(
+            text,
+            disable_web_page_preview=True
+        )
+
+    # ================= GROUP / SUPERGROUP =================
+    role = "User"
+    try:
+        m = await client.get_chat_member(chat.id, user.id)
+        if m.status == ChatMemberStatus.OWNER:
+            role = "Group Owner 👑"
+        elif m.status == ChatMemberStatus.ADMINISTRATOR:
+            role = "Group Admin 🛡"
+    except:
+        pass
+
+    text = MY_ID_CARD_GROUP.format(
+        name=user.first_name,
+        user_id=user.id,
+        username=username,
+        account=account,
+        role=role,
+        chat_id=chat.id,
+        chat_name=chat.title,
+        chat_type=chat.type,
+        message_id=message.id,
+        time=time_now
+    )
+
+    await message.reply(
+        text,
+        disable_web_page_preview=True
+    )
+
 
 ADMIN_KEYWORDS = ["admin", "@admin", "admins", "help", "support"]
 
