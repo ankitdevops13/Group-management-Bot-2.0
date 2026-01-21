@@ -3385,6 +3385,57 @@ async def is_group_admin(client, chat_id, user_id):
 def is_bot_admin(user_id: int) -> bool:
     return user_id in INITIAL_ADMINS
 
+async def get_all_admins(client, chat_id):
+    """
+    Returns: dict {user_id: user_object}
+    Includes:
+    - Group Owner
+    - Group Administrators
+    - Bot Admins
+    """
+    admins = {}
+
+    # ===== GROUP OWNER + ADMINS =====
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if m.user and not m.user.is_bot:
+            admins[m.user.id] = m.user
+
+    # ===== BOT ADMINS =====
+    for admin_id in INITIAL_ADMINS:
+        if admin_id in admins:
+            continue
+        try:
+            user = await client.get_users(admin_id)
+            if not user.is_bot:
+                admins[user.id] = user
+        except:
+            pass
+
+    return admins
+
+async def is_any_admin(client, chat_id, user_id):
+    """
+    Returns True if user is:
+    - Group Owner
+    - Group Admin
+    - Bot Admin
+    """
+    # Bot admin
+    if user_id in INITIAL_ADMINS:
+        return True
+
+    # Group admin / owner
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
 
 @app.on_chat_member_updated()
 async def welcome_with_userdata(client, update):
@@ -3393,7 +3444,7 @@ async def welcome_with_userdata(client, update):
         return
 
     if (
-        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]
+        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
         and update.new_chat_member.status == ChatMemberStatus.MEMBER
     ):
         user = update.new_chat_member.user
@@ -3422,28 +3473,16 @@ async def welcome_with_userdata(client, update):
         # await asyncio.sleep(120)
         # await msg.delete()
 
-@app.on_message(filters.command("start"))
-async def start_cmd(client, message: Message):
-
-    # animation
-    loading = await animated_start(message)
-
-    await asyncio.sleep(0.5)
-
-    await loading.edit(
-        START_INTRO.format(
-            user=message.from_user.mention
-        ),
-        disable_web_page_preview=True
-    )
-    
+ 
+# ================== TAG ALL ==================
 @app.on_message(filters.command("tagall","utag") & filters.group)
-async def tag_all(client, message: Message):
+async def tag_all(client: Client, message: Message):
+
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
-        return await message.reply("❌ **Admin only command**")
+    if not await is_any_admin(client, chat_id, user_id):
+        return await message.reply("❌ **Only admin can use this command**")
 
     if is_on_cooldown(user_id):
         return await message.reply("⏳ **Cooldown active, try later**")
@@ -3465,19 +3504,28 @@ async def tag_all(client, message: Message):
             members.append(m.user)
 
     batch = []
+
     for user in members:
         if chat_id in STOP_TAG:
             await start_msg.edit(STOP_CARD)
             return
 
         batch.append(user)
+
         if len(batch) == TAG_LIMIT:
-            await send_normal_tag(client, chat_id, batch)
+            if message.reply_to_message:
+                await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+            else:
+                await send_normal_tag(client, chat_id, batch)
+
             batch.clear()
             await asyncio.sleep(DELAY)
 
     if batch:
-        await send_normal_tag(client, chat_id, batch)
+        if message.reply_to_message:
+            await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+        else:
+            await send_normal_tag(client, chat_id, batch)
 
     await start_msg.edit(
         DONE_CARD.format(
@@ -3486,25 +3534,35 @@ async def tag_all(client, message: Message):
         )
     )
 
-@app.on_message(filters.command("tagadmin","admintag","atag") & filters.group)
+# ================== TAG ADMINS (GROUP + BOT) ==================
+@app.on_message(filters.command("tagadmin","atag","admintag") & filters.group)
 async def tag_admins(client, message: Message):
     chat_id = message.chat.id
-    user_id = message.from_user.id
-
-    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
-        return await message.reply("❌ **Admin only command**")
-
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
 
+    mentioned = set()
+
+    # ===== GROUP OWNER + ADMINS =====
     async for m in client.get_chat_members(
         chat_id,
         filter=ChatMembersFilter.ADMINISTRATORS
     ):
-        if not m.user.is_bot:
+        if m.user and not m.user.is_bot:
+            mentioned.add(m.user.id)
             text += premium_tag(m.user) + "\n"
 
-    await message.reply(text, disable_web_page_preview=True)
+    # ===== BOT ADMINS =====
+    for admin_id in INITIAL_ADMINS:
+        if admin_id in mentioned:
+            continue
+        try:
+            user = await client.get_users(admin_id)
+            if not user.is_bot:
+                text += premium_tag(user) + " ⚡\n"
+        except:
+            pass
 
+    await message.reply(text, disable_web_page_preview=True)
 
 @app.on_message(filters.command("purge") & filters.group)
 async def purge_cmd(client, message: Message):
