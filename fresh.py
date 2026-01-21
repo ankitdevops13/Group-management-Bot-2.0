@@ -721,6 +721,30 @@ async def get_admin_level_text(user_id: int, is_bot_admin: bool, is_super_admin:
     else:
         return "👤 **Regular User**"
 
+def parse_duration(duration_str: str):
+    """Parse duration string like 1h, 30m, 2d, 1w into timedelta"""
+    try:
+        duration_str = duration_str.lower().strip()
+        
+        if duration_str.endswith("m"):
+            minutes = int(duration_str[:-1])
+            return timedelta(minutes=minutes)
+        elif duration_str.endswith("h"):
+            hours = int(duration_str[:-1])
+            return timedelta(hours=hours)
+        elif duration_str.endswith("d"):
+            days = int(duration_str[:-1])
+            return timedelta(days=days)
+        elif duration_str.endswith("w"):
+            weeks = int(duration_str[:-1])
+            return timedelta(weeks=weeks)
+        elif duration_str.isdigit():
+            return timedelta(minutes=int(duration_str))
+        else:
+            return None
+    except (ValueError, AttributeError):
+        return None
+
 
 ABUSE_WORDS = [
     # English abuse words
