@@ -1476,7 +1476,7 @@ async def my_status_callback(client, cq):
     chat = cq.message.chat
     
     # Get basic admin status
-    is_bot_admin_user = is_admin(user.id)
+    is_bot_admin_user = is_bot_admin(user.id)
     is_super_admin_user = (user.id == SUPER_ADMIN)
     
     # Different display for private vs group chats
@@ -1928,7 +1928,7 @@ async def super_admin_panel_callback(client, cq):
 @app.on_callback_query(filters.regex("^list_admins$"))
 async def list_admins_callback(client, cq):
     """List all bot admins"""
-    if not is_admin(cq.from_user.id):
+    if not is_bot_admin(cq.from_user.id):
         await cq.answer("❌ Bot admins only!", show_alert=True)
         return
     
@@ -2561,7 +2561,7 @@ async def final_auto_abuse_handler(client, message):
     except:
         pass
 
-    if is_admin(user_id):  # Bot admin / super admin
+    if is_bot_admin(user_id):  # Bot admin / super admin
         return
 
     # ===== DELETE ABUSE MESSAGE =====
@@ -2818,7 +2818,7 @@ async def handle_moderation_command(client, message: Message, command_type="mute
     
     # Check admin status
     user_id = message.from_user.id
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, message.chat.id, user_id)
     
     # Determine which command prefix to use
@@ -2961,7 +2961,7 @@ async def universal_mute(client, message: Message):
             reason = " ".join(args)
     
     # Check admin type for message
-    is_bot_admin_user = is_admin(message.from_user.id)
+    is_bot_admin_user = is_bot_admin(message.from_user.id)
     command_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
     
     try:
@@ -3017,7 +3017,7 @@ async def universal_unmute(client, message: Message):
     
     # Check admin status
     user_id = message.from_user.id
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, message.chat.id, user_id)
     
     command_prefix = message.command[0]
@@ -3177,7 +3177,7 @@ async def universal_warn(client, message: Message):
         reason = " ".join(args)
     
     # Check admin type for message
-    is_bot_admin_user = is_admin(message.from_user.id)
+    is_bot_admin_user = is_bot_admin(message.from_user.id)
     command_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
     
     # Save warning to database
@@ -3292,7 +3292,7 @@ async def universal_unban(client, message: Message):
     target_user, _ = result
     
     # Check admin type for message
-    is_bot_admin_user = is_admin(message.from_user.id)
+    is_bot_admin_user = is_bot_admin(message.from_user.id)
     command_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
     
     try:
@@ -3337,7 +3337,7 @@ async def universal_kick(client, message: Message):
         reason = " ".join(args)
     
     # Check admin type for message
-    is_bot_admin_user = is_admin(message.from_user.id)
+    is_bot_admin_user = is_bot_admin(message.from_user.id)
     command_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
     
     try:
@@ -3464,7 +3464,7 @@ async def remove_bot_admin_command(client, message: Message):
 @app.on_message(filters.command("listbotadmins") & filters.private)
 async def list_bot_admins_command(client, message: Message):
     """List all bot admins"""
-    if not is_admin(message.from_user.id):
+    if not is_bot_admin(message.from_user.id):
         await message.reply_text("❌ **Access Denied** - Bot admins only")
         return
     
@@ -3513,7 +3513,7 @@ async def complete_help_command(client, message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id if message.chat.type != "private" else None
     
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = False
     
     if chat_id:
@@ -3803,7 +3803,7 @@ async def lock_chat_permissions(client, message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
     
     if not (is_group_admin_user or is_bot_admin_user):
@@ -4024,7 +4024,7 @@ async def unlock_chat_permissions(client, message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
     
     if not (is_group_admin_user or is_bot_admin_user):
@@ -4244,7 +4244,7 @@ async def lock_callback_handler(client, cq):
     user_id = cq.from_user.id
     
     # Check permissions
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
     
     if not (is_group_admin_user or is_bot_admin_user):
@@ -4275,7 +4275,7 @@ async def unlock_callback_handler(client, cq):
     user_id = cq.from_user.id
     
     # Check permissions
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
     
     if not (is_group_admin_user or is_bot_admin_user):
@@ -4454,7 +4454,7 @@ async def promote_command(client, message: Message):
 
     is_owner = member.status == ChatMemberStatus.OWNER
     is_group_admin = member.status == ChatMemberStatus.ADMINISTRATOR
-    is_bot_admin_user = is_admin(caller_id)  # bot / super admin
+    is_bot_admin_user = is_bot_admin(caller_id)  # bot / super admin
 
     if not (is_owner or is_group_admin or is_bot_admin_user):
         await message.reply_text(
@@ -4579,7 +4579,7 @@ async def demote_command(client, message: Message):
     caller = message.from_user
     caller_id = caller.id
 
-    is_bot_admin_user = is_admin(caller_id)
+    is_bot_admin_user = is_bot_admin(caller_id)
     member = await client.get_chat_member(chat_id, caller_id)
     is_owner = member.status == ChatMemberStatus.OWNER
 
@@ -5000,12 +5000,12 @@ def parse_time_duration(time_str):
         return None
 
 # ================= BOT ADMIN LOCK COMMANDS =================
-@app.on_message(filters.private & filters.command(["block", "bblock"]))
+@app.on_message(filters.private & filters.command(["glock", "gblock"]))
 async def bot_admin_lock_command(client, message: Message):
     """Bot admin lock command - works by chat ID"""
     
     # Check if user is bot admin
-    if not is_admin(message.from_user.id):
+    if not is_bot_admin(message.from_user.id):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
             "❌ **Bot Admin Required**\n"
@@ -5155,12 +5155,12 @@ async def bot_admin_lock_command(client, message: Message):
         )
 
 
-@app.on_message(filters.private & filters.command(["unblock", "bunblock"]))
+@app.on_message(filters.private & filters.command(["gunblock", "bunblock"]))
 async def bot_admin_unlock_command(client, message: Message):
     """Bot admin unlock command - works by chat ID"""
     
     # Check if user is bot admin
-    if not is_admin(message.from_user.id):
+    if not is_bot_admin(message.from_user.id):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
             "❌ **Bot Admin Required**"
@@ -5266,7 +5266,7 @@ async def bot_admin_lock_status_command(client, message: Message):
     """Check lock status by chat ID"""
     
     # Check if user is bot admin
-    if not is_admin(message.from_user.id):
+    if not is_bot_admin(message.from_user.id):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
             "❌ **Bot Admin Required**"
@@ -5394,7 +5394,7 @@ async def bot_admin_lock_status_command(client, message: Message):
 @app.on_callback_query(filters.regex("^block:"))
 async def bot_admin_lock_callback(client, cq):
     """Quick lock from callback"""
-    if not is_admin(cq.from_user.id):
+    if not is_bot_admin(cq.from_user.id):
         await cq.answer("❌ Bot admin only!", show_alert=True)
         return
     
@@ -5424,7 +5424,7 @@ async def bot_admin_lock_callback(client, cq):
 @app.on_callback_query(filters.regex("^bunlock:"))
 async def bot_admin_unlock_callback(client, cq):
     """Quick unlock from callback"""
-    if not is_admin(cq.from_user.id):
+    if not is_bot_admin(cq.from_user.id):
         await cq.answer("❌ Bot admin only!", show_alert=True)
         return
     
@@ -5454,7 +5454,7 @@ async def bot_admin_unlock_callback(client, cq):
 async def bot_admin_lock_help(client, message: Message):
     """Show bot admin lock help"""
     
-    if not is_admin(message.from_user.id):
+    if not is_bot_admin(message.from_user.id):
         await message.reply_text("❌ Bot admins only!")
         return
     
@@ -5464,7 +5464,7 @@ async def bot_admin_lock_help(client, message: Message):
 🔒 **BOT ADMIN LOCK SYSTEM**
 
 ⚡ **Commands (Private Chat Only):**
-• `/block <chat_id> <type> [duration] [silent]` - Lock group
+• `/glock <chat_id> <type> [duration] [silent]` - Lock group
 • `/unblock <chat_id> [silent]` - Unlock group  
 • `/lockstatus <chat_id>` - Check lock status
 
@@ -5505,7 +5505,7 @@ async def bot_admin_lock_help(client, message: Message):
 🎯 **Examples:**
 • `/block -100123456789 all 1h` - Lock everything for 1 hour
 • `/block -100123456789 text silent` - Lock text silently
-• `/unblock -100123456789` - Unlock everything
+• `/gunblock -100123456789` - Unlock everything
 • `/lockstatus -100123456789` - Check status
 
 ⚡ **Features:**
@@ -6329,7 +6329,7 @@ async def mybotadmin_command(client, message: Message):
     """Check if user is bot admin"""
     
     user_id = message.from_user.id
-    is_bot_admin_user = is_admin(user_id)
+    is_bot_admin_user = is_bot_admin(user_id)
     
     if is_bot_admin_user:
         if user_id == SUPER_ADMIN:
@@ -6833,7 +6833,7 @@ async def cb_reply(client, cq):
 
     admin_id = cq.from_user.id
 
-    if not is_admin(admin_id):
+    if not is_bot_admin(admin_id):
         await cq.answer("Not allowed", show_alert=True)
         return
 
@@ -6868,7 +6868,7 @@ async def user_handler(client, message: Message):
     uid = message.from_user.id
 
     # ---------- ADMIN CHECK ----------
-    if is_admin(uid):
+    if is_bot_admin(uid):
         return
 
     # ---------- BLOCK CHECK ----------
@@ -6972,7 +6972,7 @@ async def admin_reply_handler(client, message: Message):
 
     admin_id = message.from_user.id
 
-    if not is_admin(admin_id):
+    if not is_bot_admin(admin_id):
         return
 
     cur.execute(
