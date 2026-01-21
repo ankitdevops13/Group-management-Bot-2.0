@@ -204,6 +204,12 @@ CREATE TABLE IF NOT EXISTS report_cooldown (
 )
 """)
 
+cur.execute("""
+CREATE TABLE IF NOT EXISTS cooldown (
+    user_id INTEGER PRIMARY KEY,
+    last_used INTEGER
+)
+""")
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS tag_cooldown (
@@ -3150,3 +3156,598 @@ async def cleanup_abuse_cache_task():
         
         await asyncio.sleep(3600)  # Run every hour
 
+# ================== IMPORTS ==================
+
+
+TAG_LIMIT = 5          # per message
+DELAY = 2              # seconds
+COOLDOWN = 120         # seconds
+
+
+PURGE_REPORT_DELETE_AFTER = 15  # seconds
+# ================== DATABASE ==================
+STOP_TAG = set()
+
+# ================== HELPERS ==================
+def is_on_cooldown(user_id):
+    cur.execute("SELECT last_used FROM cooldown WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        return False
+    return time.time() - row[0] < COOLDOWN
+
+def update_cooldown(user_id):
+    cur.execute(
+        "REPLACE INTO cooldown VALUES (?,?)",
+        (user_id, int(time.time()))
+    )
+    conn.commit()
+
+async def gc_admin(client, chat_id, user_id):
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if m.user and m.user.id == user_id:
+            return True
+    return False
+
+
+
+async def can_purge(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return True
+    try:
+        m = await client.get_chat_member(chat_id, user_id)
+        return m.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
+
+
+async def get_user_role(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return "Bot Admin 💎"
+    try:
+        m = await client.get_chat_member(chat_id, user_id)
+        if m.status == ChatMemberStatus.OWNER:
+            return "Group Owner 👑"
+        if m.status == ChatMemberStatus.ADMINISTRATOR:
+            return "Group Admin 🛡"
+    except:
+        pass
+    return "User"
+
+
+def purge_fail_reason(deleted, failed):
+    if deleted == 0:
+        return "Bot does not have permission to delete messages."
+    if failed > 0:
+        return "Some messages are too old or restricted by Telegram."
+    return "Unknown error."
+
+
+async def notify_admins(client, chat_id):
+    text = "🚨 **Admin Notification** 🚨\n\n"
+
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            text += f"[{m.user.first_name}](tg://user?id={m.user.id})  "
+
+    return text
+# ================== MENTION (NO VISIBLE LINK) ==================
+def mention(user):
+    return f"[{user.first_name}](tg://user?id={user.id})"
+
+def premium_tag(user):
+    emojis = ["🦋","🔥","✨","💖","👑","⚡"]
+    return f"{emojis[user.id % len(emojis)]} {mention(user)}"
+
+# ================== UI CARDS ==================
+START_INTRO = """
+╔═══════════════════╗
+ 🌸 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗧𝗔𝗚𝗚𝗘𝗥 🌸
+╚═══════════════════╝
+
+✨ **Welcome {user}**
+
+🚀 Fast • Safe • Premium  
+👑 Admin-only tagging system
+
+━━━━━━━━━━━━━━━━━━━
+📌 Commands:
+/tagall – Tag all members  
+/tagadmin – Tag admins  
+/stop – Stop tagging
+"""
+
+WELCOME_USER_CARD = """
+╔═══════════════════╗
+   🎉 𝗡𝗘𝗪 𝗠𝗘𝗠𝗕𝗘𝗥 🎉
+╚═══════════════════╝
+
+👋 **Welcome:** {mention}
+
+━━━━━━━━━━━━━━━━━━━
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+🕒 **Joined:** {time}
+
+━━━━━━━━━━━━━━━━━━━
+💎 **Group:** {group}
+
+📌 Please follow group rules  
+⚡ Enjoy your stay!
+"""
+
+START_CARD = """
+╔═══════════════════╗
+   💎 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗧𝗔𝗚𝗚𝗘𝗥
+╚═══════════════════╝
+
+🚀 **Tagging Started**
+━━━━━━━━━━━━━━━━━━━
+👑 **Admin:** {admin}
+🎯 **Target:** {target}
+
+🛑 Use Stop button to cancel
+"""
+
+DONE_CARD = """
+╔═══════════════════╗
+   ✅ 𝗧𝗔𝗦𝗞 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗
+╚═══════════════════╝
+
+👥 **Total Tagged:** {total}
+👑 **By:** {admin}
+
+💎 Premium Tagger
+"""
+
+STOP_CARD = """
+╔═══════════════════╗
+   🛑 𝗧𝗔𝗚𝗚𝗜𝗡𝗚 𝗦𝗧𝗢𝗣𝗣𝗘𝗗
+╚═══════════════════╝
+⚠️ Process cancelled by admin
+"""
+
+
+PURGE_DONE_CARD = """
+╔═══════════════════╗
+   🧹 𝗣𝗨𝗥𝗚𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+🗑 **Deleted:** `{count}`
+💬 **Chat:** {chat}
+🕒 **Time:** {time}
+
+💎 Premium Moderation
+"""
+
+
+PURGE_FAIL_CARD = """
+╔═══════════════════╗
+   ❌ 𝗣𝗨𝗥𝗚𝗘 𝗙𝗔𝗜𝗟𝗘𝗗
+╚═══════════════════╝
+
+👑 **Requested By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+⚠️ **Deleted:** `{deleted}`
+🚫 **Failed:** `{failed}`
+
+📌 **Reason:**
+{reason}
+
+💡 Tip: Check bot admin permissions
+"""
+
+PURGE_DONE_CARD = """
+╔═══════════════════╗
+   🧹 𝗕𝗨𝗟𝗞 𝗣𝗨𝗥𝗚𝗘 𝗗𝗢𝗡𝗘
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+🗑 **Deleted:** `{count}`
+💬 **Chat:** {chat}
+🕒 **Time:** {time}
+
+💎 Premium Moderation
+"""
+
+PURGE_FAIL_CARD = """
+╔═══════════════════╗
+   ❌ 𝗕𝗨𝗟𝗞 𝗣𝗨𝗥𝗚𝗘 𝗙𝗔𝗜𝗟𝗘𝗗
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+⚠️ **Deleted:** `{deleted}`
+🚫 **Failed:** `{failed}`
+
+📌 **Reason:**
+{reason}
+"""
+
+def buttons():
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("🛑 Stop", callback_data="stop_tag"),
+            InlineKeyboardButton("👑 Tag Admins", callback_data="tag_admin")
+        ]]
+    )
+
+# ================== SEND TAG MESSAGES ==================
+async def send_reply_tag(client, chat_id, reply_id, users):
+    text = (
+        "╭──────── ✨ ────────╮\n"
+        "   💌 𝗠𝗘𝗠𝗕𝗘𝗥 𝗧𝗔𝗚 💌\n"
+        "╰──────── ✨ ────────╯\n\n"
+    )
+
+    for u in users:
+        text += premium_tag(u) + "   "
+
+    text += "\n\n━━━━━━━━━━━━━━━━━━\n⚡ Please check message above"
+
+    await client.send_message(
+        chat_id,
+        text,
+        reply_to_message_id=reply_id,
+        disable_web_page_preview=True
+    )
+
+async def send_normal_tag(client, chat_id, users):
+    text = (
+        "╭──────── ✨ ────────╮\n"
+        "   ✨ 𝗔𝗧𝗧𝗘𝗡𝗧𝗜𝗢𝗡 ✨\n"
+        "╰──────── ✨ ────────╯\n\n"
+    )
+    
+    for u in users:
+        text += premium_tag(u) + "   "
+
+    text += "\n\n━━━━━━━━━━━━━━━━━━\n⚡ Please check message above"
+    
+    await client.send_message(
+        chat_id,
+        text,
+        disable_web_page_preview=True
+    )
+
+async def animated_start(message):
+    frames = [
+        "⏳ Initializing Premium Tagger .",
+        "⏳ Initializing Premium Tagger ..",
+        "⏳ Initializing Premium Tagger ...",
+        "⚡ Loading modules",
+        "⚡ Loading modules .",
+        "⚡ Loading modules ..",
+        "⚡ Ready 🚀"
+    ]
+
+    msg = await message.reply(frames[0])
+
+    for frame in frames[1:]:
+        await asyncio.sleep(0.5)
+        await msg.edit(frame)
+
+    return msg
+
+
+@app.on_chat_member_updated()
+async def welcome_with_userdata(client, update):
+
+    if not update.old_chat_member or not update.new_chat_member:
+        return
+
+    if (
+        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]
+        and update.new_chat_member.status == ChatMemberStatus.MEMBER
+    ):
+        user = update.new_chat_member.user
+        chat = update.chat
+
+        username = f"@{user.username}" if user.username else "Not set"
+        account = "Bot 🤖" if user.is_bot else "User 👤"
+        join_time = datetime.now().strftime("%d %b %Y • %I:%M %p")
+
+        text = WELCOME_USER_CARD.format(
+            mention=mention(user),
+            user_id=user.id,
+            username=username,
+            account=account,
+            time=join_time,
+            group=chat.title
+        )
+
+        msg = await client.send_message(
+            chat.id,
+            text,
+            disable_web_page_preview=True
+        )
+
+        # OPTIONAL: auto delete welcome after 2 minutes
+        # await asyncio.sleep(120)
+        # await msg.delete()
+
+@app.on_message(filters.command("start"))
+async def start_cmd(client, message: Message):
+
+    # animation
+    loading = await animated_start(message)
+
+    await asyncio.sleep(0.5)
+
+    await loading.edit(
+        START_INTRO.format(
+            user=message.from_user.mention
+        ),
+        disable_web_page_preview=True
+    )
+
+
+# ================== TAG ALL ==================
+@app.on_message(filters.command("tagall") & filters.group)
+async def tag_all(client: Client, message: Message):
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    if not await gc_admin(client, chat_id, user_id):
+        return await message.reply("❌ **Only admin can use this command**")
+
+    if is_on_cooldown(user_id):
+        return await message.reply("⏳ **Cooldown active, try later**")
+
+    update_cooldown(user_id)
+    STOP_TAG.discard(chat_id)
+
+    start_msg = await message.reply(
+        START_CARD.format(
+            admin=message.from_user.mention,
+            target="All Members"
+        ),
+        reply_markup=buttons()
+    )
+
+    members = []
+    async for m in client.get_chat_members(chat_id):
+        if not m.user.is_bot:
+            members.append(m.user)
+
+    batch = []
+
+    for user in members:
+        if chat_id in STOP_TAG:
+            await start_msg.edit(STOP_CARD)
+            return
+
+        batch.append(user)
+
+        if len(batch) == TAG_LIMIT:
+            if message.reply_to_message:
+                await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+            else:
+                await send_normal_tag(client, chat_id, batch)
+
+            batch.clear()
+            await asyncio.sleep(DELAY)
+
+    if batch:
+        if message.reply_to_message:
+            await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+        else:
+            await send_normal_tag(client, chat_id, batch)
+
+    await start_msg.edit(
+        DONE_CARD.format(
+            total=len(members),
+            admin=message.from_user.mention
+        )
+    )
+
+# ================== TAG ADMINS ==================
+@app.on_message(filters.command("tagadmin") & filters.group)
+async def tag_admins(client, message: Message):
+    text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
+    async for m in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+        text += premium_tag(m.user) + "\n"
+    await message.reply(text, disable_web_page_preview=True)
+
+# ================== STOP ==================
+@app.on_message(filters.command("stop") & filters.group)
+async def stop_cmd(client, message: Message):
+    STOP_TAG.add(message.chat.id)
+    await message.reply("🛑 **Tagging stopped**")
+
+@app.on_callback_query(filters.regex("stop_tag"))
+async def stop_cb(client, cb):
+    STOP_TAG.add(cb.message.chat.id)
+    await cb.message.edit(STOP_CARD)
+
+@app.on_callback_query(filters.regex("tag_admin"))
+async def tag_admin_cb(client, cb):
+    text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
+    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+        text += premium_tag(m.user) + "\n"
+    await cb.message.reply(text, disable_web_page_preview=True)
+
+
+@app.on_message(filters.command("purge") & filters.group)
+async def purge_cmd(client, message):
+
+    silent = "-s" in message.command
+
+    if not await can_purge(client, message.chat.id, message.from_user.id):
+        if not silent:
+            await message.reply("❌ **Admin only command**")
+        return
+
+    if not message.reply_to_message:
+        if not silent:
+            await message.reply("⚠️ **Reply to a message to purge**")
+        return
+
+    start_id = message.reply_to_message.id
+    end_id = message.id
+
+    deleted = 0
+    failed = 0
+
+    for msg_id in range(start_id, end_id + 1):
+        try:
+            await client.delete_messages(message.chat.id, msg_id)
+            deleted += 1
+            await asyncio.sleep(0.08)
+        except:
+            failed += 1
+
+    if silent:
+        return
+
+    role = await get_user_role(client, message.chat.id, message.from_user.id)
+
+    # ❌ FAILURE / PARTIAL FAILURE
+    if failed > 0:
+        report = await message.reply(
+            PURGE_FAIL_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                deleted=deleted,
+                failed=failed,
+                reason=purge_fail_reason(deleted, failed)
+            ),
+            disable_web_page_preview=True
+        )
+    else:
+        # ✅ SUCCESS (already implemented)
+        report = await message.reply(
+            PURGE_DONE_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                count=deleted,
+                chat=message.chat.title,
+                time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+            ),
+            disable_web_page_preview=True
+        )
+
+    # auto delete report
+    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
+    await report.delete()
+
+@app.on_message(filters.command("purgeall") & filters.group)
+async def bulk_purge(client, message):
+
+    silent = "-s" in message.command
+
+    if not await can_purge(client, message.chat.id, message.from_user.id):
+        if not silent:
+            await message.reply("❌ **Only Group Admin or Bot Admin can use this command**")
+        return
+
+    if len(message.command) < 2:
+        if not silent:
+            await message.reply("⚠️ Usage: `/purgeall 50`")
+        return
+
+    try:
+        limit = int(message.command[1])
+        if limit <= 0:
+            raise ValueError
+    except:
+        if not silent:
+            await message.reply("❌ Invalid number")
+        return
+
+    deleted = 0
+    failed = 0
+
+    async for msg in client.get_chat_history(
+        message.chat.id,
+        limit=limit + 1
+    ):
+        try:
+            await msg.delete()
+            deleted += 1
+            await asyncio.sleep(0.05)
+        except:
+            failed += 1
+
+    if silent:
+        return
+
+    role = await get_user_role(client, message.chat.id, message.from_user.id)
+
+    # ❌ FAILURE / PARTIAL
+    if failed > 0:
+        report = await message.reply(
+            PURGE_FAIL_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                deleted=deleted,
+                failed=failed,
+                reason=purge_fail_reason(deleted, failed)
+            ),
+            disable_web_page_preview=True
+        )
+    else:
+        # ✅ SUCCESS
+        report = await message.reply(
+            PURGE_DONE_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                count=deleted,
+                chat=message.chat.title,
+                time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+            ),
+            disable_web_page_preview=True
+        )
+
+    # 🧹 Auto-delete report
+    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
+    await report.delete()
+
+ADMIN_KEYWORDS = ["admin", "@admin", "admins", "help", "support"]
+
+@app.on_message(filters.group & filters.text)
+async def admin_call_detector(client, message):
+
+    text = message.text.lower()
+
+    if any(word in text for word in ADMIN_KEYWORDS):
+        notify_text = await notify_admins(client, message.chat.id)
+
+        await message.reply(
+            notify_text,
+            disable_web_page_preview=True
+        )
+
+
+# ================== RUN ==================
+app.run()
