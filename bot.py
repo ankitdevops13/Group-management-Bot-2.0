@@ -496,13 +496,6 @@ async def get_admin_status_text(client, chat_id, user_id):
 
 # Abude words auto detect helper function 
 
-def abuse_warning(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
-    conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
-    return cur.fetchone()[0]
-
 def get_warn(chat_id, user_id):
     cur.execute(
         "SELECT warns FROM abuse_warns WHERE chat_id=? AND user_id=?",
