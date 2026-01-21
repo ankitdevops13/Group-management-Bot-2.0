@@ -5920,7 +5920,7 @@ async def purge_cmd(client, message):
 
     silent = "-s" in message.command
 
-    if not await can_purge(client, message.chat.id, message.from_user.id):
+    if not await check_admin_type(client, message.chat.id, message.from_user.id):
         if not silent:
             await message.reply("❌ **Admin only command**")
         return
@@ -5985,7 +5985,7 @@ async def bulk_purge(client, message):
 
     silent = "-s" in message.command
 
-    if not await can_purge(client, message.chat.id, message.from_user.id):
+    if not await check_admin_type(client, message.chat.id, message.from_user.id):
         if not silent:
             await message.reply("❌ **Only Group Admin or Bot Admin can use this command**")
         return
@@ -6821,7 +6821,7 @@ async def cb_reply(client, cq):
 
     admin_id = cq.from_user.id
 
-    if not is_bot_admin(admin_id):
+    if not is_admin(admin_id):
         await cq.answer("Not allowed", show_alert=True)
         return
 
@@ -6960,7 +6960,7 @@ async def admin_reply_handler(client, message: Message):
 
     admin_id = message.from_user.id
 
-    if not is_bot_admin(admin_id):
+    if not is_admin(admin_id):
         return
 
     cur.execute(
