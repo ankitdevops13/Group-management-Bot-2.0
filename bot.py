@@ -1,4 +1,4 @@
-vnimport asyncio
+import asyncio
 import re
 import glob  # For backup system
 import sqlite3
