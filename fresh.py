@@ -2470,54 +2470,6 @@ async def lock_status_command(client, message: Message):
 3. Contact support if persists
 """
         await message.reply_text(error_text + beautiful_footer())
-          
-
-# ================= FORWARDED MESSAGE FILTER =================
-@app.on_message(filters.group & ~filters.service)
-async def forward_lock_filter(client, message: Message):
-    """Auto-delete forwarded messages if forward lock is active"""
-    
-    chat_id = message.chat.id
-    
-    # Check if forward lock is active
-    if chat_id in chat_locks and "forward" in chat_locks[chat_id]:
-        # Check if message is forwarded
-        if message.forward_from or message.forward_from_chat or message.forward_from_message_id:
-            # Check if sender is admin
-            try:
-                if await can_user_restrict(client, chat_id, message.from_user.id):
-                    return  # Admins can forward
-            except:
-                pass
-            
-            # Delete forwarded message
-            try:
-                await message.delete()
-                
-                # Send warning that auto-deletes
-                warning = await message.reply_text(
-                    f"{beautiful_header('security')}\n\n"
-                    "📨 **FORWARDED MESSAGE BLOCKED**\n\n"
-                    f"👤 **User:** {message.from_user.mention}\n"
-                    f"🆔 **ID:** `{message.from_user.id}`\n"
-                    "❌ **Action:** Message deleted\n\n"
-                    "⚠️ **Forward lock is active in this group.**\n"
-                    "Forwarded messages are automatically deleted.\n"
-                    "Please send original content instead."
-                    f"{beautiful_footer()}"
-                )
-                
-                await asyncio.sleep(5)
-                await warning.delete()
-                
-                # Log this action
-                print(f"Deleted forwarded message from {message.from_user.id} in chat {chat_id}")
-                
-            except Exception as e:
-                print(f"Error deleting forwarded message: {e}")
-
-
-
 
 # ================= Group lock by Bot admin COMMAND =================
 group_locks = {}  
@@ -3047,8 +2999,6 @@ All permissions have been restored.
         )
 
 
-
-
 # ================= BOT ADMIN LOCK HELP =================
 @app.on_message(filters.private & filters.command("lockhelp"))
 async def bot_admin_lock_help(client, message: Message):
@@ -3153,8 +3103,6 @@ async def cleanup_abuse_cache_task():
         await asyncio.sleep(3600)  # Run every hour
 
 # ================== IMPORTS ==================
-
-
 TAG_LIMIT = 5          # per message
 DELAY = 2              # seconds
 COOLDOWN = 120         # seconds
@@ -3243,7 +3191,7 @@ def mention(user):
 def premium_tag(user):
     emojis = ["🦋","🔥","✨","💖","👑","⚡"]
     return f"{emojis[user.id % len(emojis)]} {mention(user)}"
-
+    
 # ================== UI CARDS ==================
 START_INTRO = """
 ╔═══════════════════╗
