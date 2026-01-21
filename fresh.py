@@ -330,8 +330,8 @@ cur.execute("""
 CREATE TABLE IF NOT EXISTS user_warnings (
     chat_id INTEGER,
     user_id INTEGER,
-    warns INTEGER DEFAULT 0,
-    PRIMARY KEY (chat_id, user_id)
+    reason TEXT,
+    warned_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
@@ -1436,6 +1436,214 @@ async def list_bot_admins_command(client, message: Message):
         + beautiful_footer()
     )
 
+
+
+@app.on_message(filters.command("promote") & filters.group)
+async def promote_command(client, message: Message):
+    chat_id = message.chat.id
+    caller = message.from_user
+    caller_id = caller.id
+
+    # ================= CALLER STATUS =================
+    member = await client.get_chat_member(chat_id, caller_id)
+
+    is_owner = member.status == ChatMemberStatus.OWNER
+    is_group_admin = member.status == ChatMemberStatus.ADMINISTRATOR
+    is_bot_admin_user = is_admin(caller_id)
+
+    if not (is_owner or is_group_admin or is_bot_admin_user):
+        return await message.reply_text("❌ Only admins can promote members")
+
+    # ================= BOT PERMISSION =================
+    bot = await client.get_chat_member(chat_id, "me")
+    if bot.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return await message.reply_text("❌ Make me admin with promote permission")
+
+    if hasattr(bot, "privileges") and not bot.privileges.can_promote_members:
+        return await message.reply_text("❌ I need Add New Admins permission")
+
+    # ================= TARGET =================
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+        args = message.command[1:]
+    elif len(message.command) > 1:
+        target = await client.get_users(message.command[1])
+        args = message.command[2:]
+    else:
+        return await message.reply_text("❌ Reply or use `/promote @user [title]`")
+
+    if target.id == caller_id:
+        return await message.reply_text("❌ You cannot promote yourself")
+
+    tm = await client.get_chat_member(chat_id, target.id)
+    if tm.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return await message.reply_text("⚠️ User already admin")
+
+    # ================= ADMIN TITLE =================
+    admin_title = "Admin"
+    if args:
+        admin_title = " ".join(args)
+
+    admin_title = admin_title[:16]  # Telegram limit
+
+    # ================= PRIVILEGES =================
+    if is_owner or is_bot_admin_user:
+        privileges = ChatPrivileges(
+            can_delete_messages=True,
+            can_restrict_members=True,
+            can_invite_users=True,
+            can_pin_messages=True,
+            can_manage_video_chats=True,
+            can_promote_members=True,
+            can_change_info=True,
+            can_manage_chat=True,
+            is_anonymous=False
+        )
+        promoter_type = "Owner" if is_owner else "Bot Admin"
+    else:
+        privileges = ChatPrivileges(
+            can_delete_messages=True,
+            can_restrict_members=True,
+            can_invite_users=True,
+            can_pin_messages=True,
+            can_manage_video_chats=True,
+            can_promote_members=False,
+            can_change_info=False,
+            can_manage_chat=False,
+            is_anonymous=False
+        )
+        promoter_type = "Group Admin"
+
+    # ================= PROMOTE =================
+    await client.promote_chat_member(
+        chat_id=chat_id,
+        user_id=target.id,
+        privileges=privileges
+    )
+
+    # ================= SET TITLE (🔥 FIX) =================
+    try:
+        await client.set_administrator_title(
+            chat_id,
+            target.id,
+            admin_title
+        )
+    except:
+        pass  # title optional hai
+
+    # ================= SUCCESS =================
+    await message.reply_text(
+        f"{beautiful_header('admin')}\n\n"
+        f"✅ **PROMOTED SUCCESSFULLY**\n\n"
+        f"👤 User: {target.mention}\n"
+        f"🏷 Title: `{admin_title}`\n"
+        f"👑 By: {caller.mention} ({promoter_type})"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_message(filters.command("demote") & filters.group)
+async def demote_command(client, message: Message):
+    chat_id = message.chat.id
+    caller = message.from_user
+    caller_id = caller.id
+
+    # ================= CALLER STATUS =================
+    try:
+        member = await client.get_chat_member(chat_id, caller_id)
+    except:
+        return
+
+    is_owner = member.status == ChatMemberStatus.OWNER
+    is_group_admin = member.status == ChatMemberStatus.ADMINISTRATOR
+    is_bot_admin_user = is_admin(caller_id)  # bot/super admin
+
+    if not (is_owner or is_group_admin or is_bot_admin_user):
+        return await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ **Only admins can demote members**"
+            f"{beautiful_footer()}"
+        )
+
+    # ================= BOT PERMISSION =================
+    try:
+        bot = await client.get_chat_member(chat_id, "me")
+    except:
+        return await message.reply_text("❌ Unable to check bot permissions")
+
+    if bot.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+        return await message.reply_text(
+            f"{beautiful_header('admin')}\n\n"
+            "❌ Make me admin with **Add New Admins** permission"
+            f"{beautiful_footer()}"
+        )
+
+    if hasattr(bot, "privileges"):
+        if not bot.privileges.can_promote_members:
+            return await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                "❌ I need **Add New Admins** permission"
+                f"{beautiful_footer()}"
+            )
+
+    # ================= TARGET USER =================
+    try:
+        if message.reply_to_message:
+            target = message.reply_to_message.from_user
+        elif len(message.command) > 1:
+            target = await client.get_users(message.command[1])
+        else:
+            return await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                "❌ Reply to a user or use `/demote @user`"
+                f"{beautiful_footer()}"
+            )
+    except:
+        return await message.reply_text("❌ User not found")
+
+    # ================= SAFETY CHECKS =================
+    if target.id == caller_id:
+        return await message.reply_text("❌ You cannot demote yourself")
+
+    try:
+        target_member = await client.get_chat_member(chat_id, target.id)
+
+        if target_member.status == ChatMemberStatus.OWNER:
+            return await message.reply_text("❌ You cannot demote the group owner")
+
+        if target_member.status != ChatMemberStatus.ADMINISTRATOR:
+            return await message.reply_text("⚠️ User is not an admin")
+    except:
+        return
+
+    # ================= DEMOTE =================
+    try:
+        # remove all admin privileges
+        await client.promote_chat_member(
+            chat_id=chat_id,
+            user_id=target.id,
+            can_change_info=False,
+            can_delete_messages=False,
+            can_restrict_members=False,
+            can_invite_users=False,
+            can_pin_messages=False,
+            can_manage_video_chats=False,
+            can_promote_members=False,
+            can_manage_chat=False,
+            is_anonymous=False
+        )
+    except Exception as e:
+        return await message.reply_text(
+            f"❌ Demote failed\n`{str(e)}`"
+        )
+
+    # ================= SUCCESS =================
+    await message.reply_text(
+        f"{beautiful_header('admin')}\n\n"
+        "✅ **ADMIN REMOVED SUCCESSFULLY**\n\n"
+        f"👤 **User:** {target.mention}\n"
+        f"👑 **By:** {caller.mention}"
+        f"{beautiful_footer()}"
+    )
 # ================= STORE LOCK STATES PER CHAT =================
 chat_locks = {}
 
@@ -2310,156 +2518,6 @@ async def forward_lock_filter(client, message: Message):
 
 
 
-
-@app.on_message(filters.command("promote") & filters.group)
-async def promote_command(client, message: Message):
-    chat_id = message.chat.id
-    caller = message.from_user
-    caller_id = caller.id
-
-    # ================= CALLER STATUS =================
-    member = await client.get_chat_member(chat_id, caller_id)
-
-    is_owner = member.status == ChatMemberStatus.OWNER
-    is_group_admin = member.status == ChatMemberStatus.ADMINISTRATOR
-    is_bot_admin_user = is_admin(caller_id)  # bot/super admin
-
-    if not (is_owner or is_group_admin or is_bot_admin_user):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Only admins can promote members**"
-            f"{beautiful_footer()}"
-        )
-        return
-
-    # ================= BOT PERMISSION =================
-    bot = await client.get_chat_member(chat_id, "me")
-    if bot.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ Make me admin with **Add New Admins** permission"
-            f"{beautiful_footer()}"
-        )
-        return
-
-    if hasattr(bot, "privileges") and not bot.privileges.can_promote_members:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ I need **Add New Admins** permission"
-            f"{beautiful_footer()}"
-        )
-        return
-
-    # ================= TARGET USER =================
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-    elif len(message.command) > 1:
-        target = await client.get_users(message.command[1])
-    else:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ Reply to a user or use `/promote @user`"
-            f"{beautiful_footer()}"
-        )
-        return
-
-    if target.id == caller_id:
-        return await message.reply_text("❌ You cannot promote yourself")
-
-    target_member = await client.get_chat_member(chat_id, target.id)
-    if target_member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        return await message.reply_text("⚠️ User already admin")
-
-    # ================= PRIVILEGES LOGIC =================
-    if is_owner or is_bot_admin_user:
-        # 🔥 FULL ADMIN
-        privileges = ChatPrivileges(
-            can_delete_messages=True,
-            can_restrict_members=True,
-            can_invite_users=True,
-            can_pin_messages=True,
-            can_manage_video_chats=True,
-            can_promote_members=True,
-            can_change_info=True,
-            can_manage_chat=True,
-            is_anonymous=False
-        )
-        promoter_type = "Owner" if is_owner else "Bot Admin"
-
-    else:
-        # 🔧 LIMITED ADMIN (GROUP ADMIN)
-        privileges = ChatPrivileges(
-            can_delete_messages=True,
-            can_restrict_members=True,
-            can_invite_users=True,
-            can_pin_messages=True,
-            can_manage_video_chats=True,
-            can_promote_members=False,   # ❌
-            can_change_info=True,
-            can_manage_chat=True,
-            is_anonymous=False           # ❌
-        )
-        promoter_type = "Group Admin"
-
-    # ================= PROMOTE =================
-    await client.promote_chat_member(chat_id, target.id, privileges)
-
-    await message.reply_text(
-        f"{beautiful_header('admin')}\n\n"
-        "✅ **PROMOTED SUCCESSFULLY**\n\n"
-        f"👤 User: {target.mention}\n"
-        f"🔧 By: {caller.mention} ({promoter_type})"
-        f"{beautiful_footer()}"
-  )
-
-@app.on_message(filters.command("demote") & filters.group)
-async def demote_command(client, message: Message):
-    chat_id = message.chat.id
-    caller = message.from_user
-    caller_id = caller.id
-
-    is_bot_admin_user = is_admin(caller_id)
-    member = await client.get_chat_member(chat_id, caller_id)
-    is_owner = member.status == ChatMemberStatus.OWNER
-
-    if not (is_owner or is_bot_admin_user):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Only Group Owner or Bot Admin can demote admins**"
-            f"{beautiful_footer()}"
-        )
-        return
-
-    # ===== GET TARGET =====
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-    elif len(message.command) > 1:
-        target = await client.get_users(message.command[1])
-    else:
-        return await message.reply_text("❌ Reply or use `/demote @user`")
-
-    target_member = await client.get_chat_member(chat_id, target.id)
-
-    if target_member.status == ChatMemberStatus.OWNER:
-        return await message.reply_text("❌ Cannot demote group owner")
-
-    if target_member.status != ChatMemberStatus.ADMINISTRATOR:
-        return await message.reply_text("⚠️ User is not admin")
-
-    # ===== DEMOTE =====
-    await client.promote_chat_member(
-        chat_id,
-        target.id,
-        privileges=ChatPrivileges()  # remove admin
-    )
-
-    await message.reply_text(
-        f"{beautiful_header('admin')}\n\n"
-        "🔻 **ADMIN REMOVED**\n\n"
-        f"👤 User: {target.mention}\n"
-        f"🔧 By: {caller.mention}"
-        f"{beautiful_footer()}"
-    )
 
 # ================= Group lock by Bot admin COMMAND =================
 group_locks = {}  
