@@ -49,6 +49,13 @@ BOT_BRAND = "Ankit Shakya Support"
 BOT_TAGLINE = "Fast • Secure • Reliable"
 DB_FILE = "support.db"
 
+
+TAG_LIMIT = 5          # per message
+DELAY = 2              # seconds
+COOLDOWN = 120         # seconds
+
+PURGE_REPORT_DELETE_AFTER = 15  # seconds
+
 # Multiple bot admins - ADD ALL YOUR ADMIN IDs HERE
 INITIAL_ADMINS = [
     6748792256,  # Super admin (you)
@@ -3102,96 +3109,9 @@ async def cleanup_abuse_cache_task():
         
         await asyncio.sleep(3600)  # Run every hour
 
-# ================== IMPORTS ==================
-TAG_LIMIT = 5          # per message
-DELAY = 2              # seconds
-COOLDOWN = 120         # seconds
-
-
-PURGE_REPORT_DELETE_AFTER = 15  # seconds
-# ================== DATABASE ==================
-STOP_TAG = set()
-
-# ================== HELPERS ==================
-def is_on_cooldown(user_id):
-    cur.execute("SELECT last_used FROM cooldown WHERE user_id=?", (user_id,))
-    row = cur.fetchone()
-    if not row:
-        return False
-    return time.time() - row[0] < COOLDOWN
-
-def update_cooldown(user_id):
-    cur.execute(
-        "REPLACE INTO cooldown VALUES (?,?)",
-        (user_id, int(time.time()))
-    )
-    conn.commit()
-
-async def gc_admin(client, chat_id, user_id):
-    async for m in client.get_chat_members(
-        chat_id,
-        filter=ChatMembersFilter.ADMINISTRATORS
-    ):
-        if m.user and m.user.id == user_id:
-            return True
-    return False
 
 
 
-async def can_purge(client, chat_id, user_id):
-    if user_id in INITIAL_ADMINS:
-        return True
-    try:
-        m = await client.get_chat_member(chat_id, user_id)
-        return m.status in (
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER
-        )
-    except:
-        return False
-
-
-async def get_user_role(client, chat_id, user_id):
-    if user_id in INITIAL_ADMINS:
-        return "Bot Admin 💎"
-    try:
-        m = await client.get_chat_member(chat_id, user_id)
-        if m.status == ChatMemberStatus.OWNER:
-            return "Group Owner 👑"
-        if m.status == ChatMemberStatus.ADMINISTRATOR:
-            return "Group Admin 🛡"
-    except:
-        pass
-    return "User"
-
-
-def purge_fail_reason(deleted, failed):
-    if deleted == 0:
-        return "Bot does not have permission to delete messages."
-    if failed > 0:
-        return "Some messages are too old or restricted by Telegram."
-    return "Unknown error."
-
-
-async def notify_admins(client, chat_id):
-    text = "🚨 **Admin Notification** 🚨\n\n"
-
-    async for m in client.get_chat_members(
-        chat_id,
-        filter=ChatMembersFilter.ADMINISTRATORS
-    ):
-        if not m.user.is_bot:
-            text += f"[{m.user.first_name}](tg://user?id={m.user.id})  "
-
-    return text
-# ================== MENTION (NO VISIBLE LINK) ==================
-def mention(user):
-    return f"[{user.first_name}](tg://user?id={user.id})"
-
-def premium_tag(user):
-    emojis = ["🦋","🔥","✨","💖","👑","⚡"]
-    return f"{emojis[user.id % len(emojis)]} {mention(user)}"
-    
 # ================== UI CARDS ==================
 START_INTRO = """
 ╔═══════════════════╗
@@ -3332,7 +3252,6 @@ PURGE_FAIL_CARD = """
 📌 **Reason:**
 {reason}
 """
-
 def buttons():
     return InlineKeyboardMarkup(
         [[
@@ -3379,24 +3298,91 @@ async def send_normal_tag(client, chat_id, users):
         disable_web_page_preview=True
     )
 
-async def animated_start(message):
-    frames = [
-        "⏳ Initializing Premium Tagger .",
-        "⏳ Initializing Premium Tagger ..",
-        "⏳ Initializing Premium Tagger ...",
-        "⚡ Loading modules",
-        "⚡ Loading modules .",
-        "⚡ Loading modules ..",
-        "⚡ Ready 🚀"
-    ]
 
-    msg = await message.reply(frames[0])
+def is_on_cooldown(user_id):
+    cur.execute("SELECT last_used FROM cooldown WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        return False
+    return time.time() - row[0] < COOLDOWN
 
-    for frame in frames[1:]:
-        await asyncio.sleep(0.5)
-        await msg.edit(frame)
+def update_cooldown(user_id):
+    cur.execute(
+        "REPLACE INTO cooldown VALUES (?,?)",
+        (user_id, int(time.time()))
+    )
+    conn.commit()
 
-    return msg
+
+async def can_purge(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return True
+    try:
+        m = await client.get_chat_member(chat_id, user_id)
+        return m.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
+
+
+async def get_user_role(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return "Bot Admin 💎"
+    try:
+        m = await client.get_chat_member(chat_id, user_id)
+        if m.status == ChatMemberStatus.OWNER:
+            return "Group Owner 👑"
+        if m.status == ChatMemberStatus.ADMINISTRATOR:
+            return "Group Admin 🛡"
+    except:
+        pass
+    return "User"
+
+
+def purge_fail_reason(deleted, failed):
+    if deleted == 0:
+        return "Bot does not have permission to delete messages."
+    if failed > 0:
+        return "Some messages are too old or restricted by Telegram."
+    return "Unknown error."
+
+
+async def notify_admins(client, chat_id):
+    text = "🚨 **Admin Notification** 🚨\n\n"
+
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            text += f"[{m.user.first_name}](tg://user?id={m.user.id})  "
+
+    return text
+# ================== MENTION (NO VISIBLE LINK) ==================
+def mention(user):
+    return f"[{user.first_name}](tg://user?id={user.id})"
+
+def premium_tag(user):
+    emojis = ["🦋","🔥","✨","💖","👑","⚡"]
+    return f"{emojis[user.id % len(emojis)]} {mention(user)}"
+
+
+
+async def is_group_admin(client, chat_id, user_id):
+    try:
+        m = await client.get_chat_member(chat_id, user_id)
+        return m.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
+
+
+def is_bot_admin(user_id: int) -> bool:
+    return user_id in INITIAL_ADMINS
 
 
 @app.on_chat_member_updated()
@@ -3406,7 +3392,7 @@ async def welcome_with_userdata(client, update):
         return
 
     if (
-        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
+        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]
         and update.new_chat_member.status == ChatMemberStatus.MEMBER
     ):
         user = update.new_chat_member.user
@@ -3449,17 +3435,14 @@ async def start_cmd(client, message: Message):
         ),
         disable_web_page_preview=True
     )
-
-
-# ================== TAG ALL ==================
-@app.on_message(filters.command("tagall") & filters.group)
-async def tag_all(client: Client, message: Message):
-
+    
+@app.on_message(filters.command("tagall","utag") & filters.group)
+async def tag_all(client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    if not await gc_admin(client, chat_id, user_id):
-        return await message.reply("❌ **Only admin can use this command**")
+    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
+        return await message.reply("❌ **Admin only command**")
 
     if is_on_cooldown(user_id):
         return await message.reply("⏳ **Cooldown active, try later**")
@@ -3481,28 +3464,19 @@ async def tag_all(client: Client, message: Message):
             members.append(m.user)
 
     batch = []
-
     for user in members:
         if chat_id in STOP_TAG:
             await start_msg.edit(STOP_CARD)
             return
 
         batch.append(user)
-
         if len(batch) == TAG_LIMIT:
-            if message.reply_to_message:
-                await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
-            else:
-                await send_normal_tag(client, chat_id, batch)
-
+            await send_normal_tag(client, chat_id, batch)
             batch.clear()
             await asyncio.sleep(DELAY)
 
     if batch:
-        if message.reply_to_message:
-            await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
-        else:
-            await send_normal_tag(client, chat_id, batch)
+        await send_normal_tag(client, chat_id, batch)
 
     await start_msg.edit(
         DONE_CARD.format(
@@ -3511,111 +3485,82 @@ async def tag_all(client: Client, message: Message):
         )
     )
 
-# ================== TAG ADMINS ==================
-@app.on_message(filters.command("tagadmin") & filters.group)
+@app.on_message(filters.command("tagadmin","admintag","atag") & filters.group)
 async def tag_admins(client, message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
+        return await message.reply("❌ **Admin only command**")
+
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
-        text += premium_tag(m.user) + "\n"
+
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            text += premium_tag(m.user) + "\n"
+
     await message.reply(text, disable_web_page_preview=True)
-
-# ================== STOP ==================
-@app.on_message(filters.command("stop") & filters.group)
-async def stop_cmd(client, message: Message):
-    STOP_TAG.add(message.chat.id)
-    await message.reply("🛑 **Tagging stopped**")
-
-@app.on_callback_query(filters.regex("stop_tag"))
-async def stop_cb(client, cb):
-    STOP_TAG.add(cb.message.chat.id)
-    await cb.message.edit(STOP_CARD)
-
-@app.on_callback_query(filters.regex("tag_admin"))
-async def tag_admin_cb(client, cb):
-    text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
-        text += premium_tag(m.user) + "\n"
-    await cb.message.reply(text, disable_web_page_preview=True)
 
 
 @app.on_message(filters.command("purge") & filters.group)
-async def purge_cmd(client, message):
-
-    silent = "-s" in message.command
-
-    if not await can_purge(client, message.chat.id, message.from_user.id):
-        if not silent:
-            await message.reply("❌ **Admin only command**")
-        return
+async def purge_cmd(client, message: Message):
 
     if not message.reply_to_message:
-        if not silent:
-            await message.reply("⚠️ **Reply to a message to purge**")
-        return
+        return await message.reply("⚠️ **Reply to a message to purge**")
 
-    start_id = message.reply_to_message.id
-    end_id = message.id
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
+        return await message.reply("❌ **Admin only command**")
+
+    start = message.reply_to_message.id
+    end = message.id
 
     deleted = 0
     failed = 0
 
-    for msg_id in range(start_id, end_id + 1):
+    for msg_id in range(start, end + 1):
         try:
-            await client.delete_messages(message.chat.id, msg_id)
+            await client.delete_messages(chat_id, msg_id)
             deleted += 1
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.05)
         except:
             failed += 1
 
-    if silent:
-        return
+    await message.reply(
+        PURGE_DONE_CARD.format(
+            mention=mention(message.from_user),
+            user_id=user_id,
+            role=await get_user_role(client, chat_id, user_id),
+            count=deleted,
+            chat=message.chat.title,
+            time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+        ),
+        disable_web_page_preview=True
+    )
 
-    role = await get_user_role(client, message.chat.id, message.from_user.id)
-
-    # ❌ FAILURE / PARTIAL FAILURE
-    if failed > 0:
-        report = await message.reply(
-            PURGE_FAIL_CARD.format(
-                mention=mention(message.from_user),
-                user_id=message.from_user.id,
-                role=role,
-                deleted=deleted,
-                failed=failed,
-                reason=purge_fail_reason(deleted, failed)
-            ),
-            disable_web_page_preview=True
-        )
-    else:
-        # ✅ SUCCESS (already implemented)
-        report = await message.reply(
-            PURGE_DONE_CARD.format(
-                mention=mention(message.from_user),
-                user_id=message.from_user.id,
-                role=role,
-                count=deleted,
-                chat=message.chat.title,
-                time=datetime.now().strftime("%d %b %Y • %I:%M %p")
-            ),
-            disable_web_page_preview=True
-        )
-
-    # auto delete report
-    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
-    await report.delete()
 
 @app.on_message(filters.command("purgeall") & filters.group)
-async def bulk_purge(client, message):
+async def purgeall_cmd(client, message: Message):
 
     silent = "-s" in message.command
+    chat_id = message.chat.id
+    user_id = message.from_user.id
 
-    if not await can_purge(client, message.chat.id, message.from_user.id):
+    # ================= PERMISSION =================
+    if not (is_bot_admin(user_id) or await is_group_admin(client, chat_id, user_id)):
         if not silent:
-            await message.reply("❌ **Only Group Admin or Bot Admin can use this command**")
+            await message.reply("❌ **Only admin can use this command**")
         return
 
+    # ================= ARGUMENT =================
     if len(message.command) < 2:
         if not silent:
-            await message.reply("⚠️ Usage: `/purgeall 50`")
+            await message.reply("⚠️ **Usage:** `/purgeall 50`")
         return
 
     try:
@@ -3624,15 +3569,16 @@ async def bulk_purge(client, message):
             raise ValueError
     except:
         if not silent:
-            await message.reply("❌ Invalid number")
+            await message.reply("❌ **Invalid number**")
         return
 
+    # ================= DELETE =================
     deleted = 0
     failed = 0
 
     async for msg in client.get_chat_history(
-        message.chat.id,
-        limit=limit + 1
+        chat_id,
+        limit=limit + 1   # include command message
     ):
         try:
             await msg.delete()
@@ -3644,14 +3590,14 @@ async def bulk_purge(client, message):
     if silent:
         return
 
-    role = await get_user_role(client, message.chat.id, message.from_user.id)
+    # ================= RESULT =================
+    role = await get_user_role(client, chat_id, user_id)
 
-    # ❌ FAILURE / PARTIAL
     if failed > 0:
-        report = await message.reply(
+        await message.reply(
             PURGE_FAIL_CARD.format(
                 mention=mention(message.from_user),
-                user_id=message.from_user.id,
+                user_id=user_id,
                 role=role,
                 deleted=deleted,
                 failed=failed,
@@ -3660,11 +3606,10 @@ async def bulk_purge(client, message):
             disable_web_page_preview=True
         )
     else:
-        # ✅ SUCCESS
-        report = await message.reply(
+        await message.reply(
             PURGE_DONE_CARD.format(
                 mention=mention(message.from_user),
-                user_id=message.from_user.id,
+                user_id=user_id,
                 role=role,
                 count=deleted,
                 chat=message.chat.title,
@@ -3673,26 +3618,35 @@ async def bulk_purge(client, message):
             disable_web_page_preview=True
         )
 
-    # 🧹 Auto-delete report
-    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
-    await report.delete()
 
-ADMIN_KEYWORDS = ["admin", "@admin", "admins", "help", "support"]
+ADMIN_KEYWORDS = [
+    "admin", "@admin", "admins",
+    "help", "support", "mod", "moderator"
+]
 
-@app.on_message(filters.group & filters.text)
-async def admin_call_detector(client, message):
-
+@app.on_message(filters.group & filters.text & ~filters.me)
+async def admin_call_detector(client, message: Message):
     text = message.text.lower()
 
-    if any(word in text for word in ADMIN_KEYWORDS):
-        notify_text = await notify_admins(client, message.chat.id)
+    if not any(word in text for word in ADMIN_KEYWORDS):
+        return
 
-        await message.reply(
-            notify_text,
-            disable_web_page_preview=True
-        )
+    notify_text = "🚨 **Admin Alert** 🚨\n\n"
+
+    async for m in client.get_chat_members(
+        message.chat.id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            notify_text += mention(m.user) + "  "
+
+    await message.reply(
+        notify_text,
+        disable_web_page_preview=True
+    )
 
 
+# ================== AUTO ABUSE FUNCTION ==================
 
 MUTE_TIME = 600  # 10 minutes
 
