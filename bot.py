@@ -278,6 +278,13 @@ CREATE TABLE IF NOT EXISTS tag_cancel (
 )
 """)
 
+cur.execute("""
+CREATE TABLE IF NOT EXISTS cooldown (
+    user_id INTEGER PRIMARY KEY,
+    last_used INTEGER
+)
+""")
+conn.commit()
 
 # ================= INDEXES =============================
 # ======================================================
@@ -3771,538 +3778,7 @@ async def complete_help_command(client, message: Message):
   )
 
 
-# ================= BOT ADMIN SPECIFIC HELP =================
-@app.on_message(filters.command("bhelp") & (filters.group | filters.private))
-async def bot_admin_help_command(client, message: Message):
-    """Bot admin specific help command"""
-    
-    if not is_admin(message.from_user.id):
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Admins Only**\n"
-            "This help is only for bot admins."
-            + beautiful_footer()
-        )
-        return
-    
-    help_text = f"""
-{beautiful_header('admin')}
 
-⚡ **BOT ADMIN COMMANDS GUIDE**
-
-🎯 **KEY FEATURE:** Works without being group admin!
-
-🗑️ **PURGE & CLEANUP:**
-• `/bpurge [number]` - Delete messages (0 = ALL)
-• `/massdelete` - Delete ALL messages (super admin)
-• `/clearchat` - Alias for massdelete
-• `/cleanup` - Clean specific message types
-• `/purgebots` - Delete bot messages
-• `/purgeservice` - Delete service messages
-
-🔒 **LOCK & UNLOCK:**
-• `/block [type]` - Lock permissions
-• `/unblock [type]` - Unlock permissions
-• `/lockstatus` - Check current locks
-
-👤 **USER MODERATION:**
-• `/bmute [user] [duration] [reason]` - Mute user
-• `/bunmute [user]` - Unmute user
-• `/bban [user] [reason]` - Ban user
-• `/bunban [user]` - Unban user
-• `/bkick [user] [reason]` - Kick user
-• `/bwarn [user] [reason]` - Warn user
-
-ℹ️ **INFORMATION:**
-• `/mybotadmin` - Check your bot admin status
-• `/checkadmin [user]` - Check admin type
-• `/mystatus` - Detailed status info
-• `/abusestats` - Abuse statistics
-
-⚙️ **ADMIN MANAGEMENT:**
-• `/listbotadmins` - List all bot admins
-• `/health` - Bot health check (super admin)
-• `/backup` - Database backup (super admin)
-
-"""
-    
-    # Add lock types
-    help_text += """
-🔒 **AVAILABLE LOCK TYPES:**
-`all, text, media, stickers, polls, invites, pins, info, url, games, inline, voice, video, audio, documents, photos, forward`
-
-🗑️ **PURGE EXAMPLES:**
-• `/bpurge 100` - Delete last 100 messages
-• `/bpurge 0` - Delete ALL messages (no limit)
-• `/bpurge` (reply) - Delete range
-• `/massdelete` - Nuclear option (confirm)
-
-⏰ **DURATION FORMAT:**
-• `30m` = 30 minutes
-• `2h` = 2 hours
-• `1d` = 1 day
-• `1w` = 1 week
-• `0` = Permanent
-
-"""
-    
-    # Add notes
-    help_text += """
-💡 **IMPORTANT NOTES:**
-
-✅ **Advantages:**
-• Works without group admin rights
-• Works in all groups where bot is admin
-• Same power as group admins
-• Cannot be demoted by group owners
-
-⚠️ **Limitations:**
-• Cannot mute/ban group admins
-• Cannot promote/demote users
-• Bot must be admin in group
-• Needs 'Restrict Users' permission
-
-🚫 **Cannot moderate:**
-• Group owners
-• Group administrators
-• Other bot admins (same level)
-• Super admin (6748792256)
-
-🔧 **Required Bot Permissions:**
-• Delete Messages
-• Restrict Members
-• Ban Members
-• Pin Messages
-• Change Chat Info
-
-📊 **Admin Hierarchy:**
-1. 👑 Super Admin (You)
-2. ⚡ Bot Admin (Added by super admin)
-3. 🔧 Group Admin (Group permissions)
-4. 👤 Regular User
-
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("🗑️ Purge Examples", callback_data="bhelp_purge"),
-            InlineKeyboardButton("🔒 Lock Examples", callback_data="bhelp_lock")
-        ],
-        [
-            InlineKeyboardButton("👤 Moderation Examples", callback_data="bhelp_mod"),
-            InlineKeyboardButton("📊 Admin Status", callback_data="mybotadmin")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Main Help", callback_data="help_main"),
-            InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")
-        ]
-    ]
-    
-    await message.reply_text(
-        help_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-  )
-
-# ================= QUICK COMMAND HELP =================
-@app.on_message(filters.command(["help_purge", "helppurge"]) & filters.group)
-async def purge_help_command(client, message: Message):
-    """Quick help for purge commands"""
-    
-    help_text = f"""
-{beautiful_header('moderation')}
-
-🗑️ **PURGE COMMANDS HELP**
-
-🎯 **Delete Multiple Messages:**
-
-**Basic Purge:**
-• `/purge 50` - Delete last 50 messages
-• `/purge 0` - Delete ALL messages (no limit)
-• `/purge` (reply to message) - Delete from reply to now
-
-**Quick Delete:**
-• `/del` (reply) - Delete single message
-• `/delete` (reply) - Alias for /del
-
-**Bot Admin Purge:**
-• `/bpurge` - Same as purge but for bot admins
-
-**Nuclear Options (Super Admin):**
-• `/massdelete` - Delete EVERYTHING (confirmation)
-• `/clearchat` - Alias for massdelete
-
-**Selective Cleanup:**
-• `/cleanup` - Menu for cleaning specific types
-• `/purgebots` - Delete all bot messages
-• `/purgeservice` - Delete service messages
-
-"""
-    
-    # Add examples
-    help_text += """
-📝 **EXAMPLES:**
-
-1. **Delete last 100 messages:**
-   `/purge 100`
-
-2. **Delete ALL messages:**
-   `/purge 0`
-
-3. **Delete range (reply to start message):**
-   Reply to a message then: `/purge`
-
-4. **Quick delete single message:**
-   Reply to message: `/del`
-
-5. **Delete bot messages only:**
-   `/purgebots`
-
-6. **Mass delete (super admin):**
-   `/massdelete` then type `CONFIRM DELETE ALL`
-
-"""
-    
-    # Add tips
-    help_text += """
-💡 **TIPS:**
-
-✅ **Best Practices:**
-• Use `/purge 100` for regular cleanup
-• Use `/purge 0` for complete reset
-• Use `/cleanup` for selective cleaning
-• Super admin can use `/massdelete`
-
-⚠️ **Warnings:**
-• No undo/recovery
-• May take time for large chats
-• Bot needs delete permission
-• Mass delete requires confirmation
-
-⚡ **Performance:**
-• Deletes 100 messages per batch
-• Shows progress indicator
-• Auto-cleans status messages
-• Handles errors gracefully
-
-🔧 **Permissions Required:**
-• Bot: Delete Messages permission
-• User: Group admin OR bot admin
-
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("🔒 Lock Help", callback_data="help_lock"),
-            InlineKeyboardButton("👤 Moderation", callback_data="help_mod")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Main Help", callback_data="help_main"),
-            InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")
-        ]
-    ]
-    
-    await message.reply_text(
-        help_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-# ================= LOCK/UNLOCK HELP =================
-@app.on_message(filters.command(["help_lock", "helplock"]) & filters.group)
-async def lock_help_command(client, message: Message):
-    """Quick help for lock/unlock commands"""
-    
-    help_text = f"""
-{beautiful_header('settings')}
-
-🔒 **LOCK/UNLOCK COMMANDS HELP**
-
-🎯 **Control what users can do in group:**
-
-**Basic Commands:**
-• `/lock [type]` - Lock specific permission
-• `/unlock [type]` - Unlock permission
-• `/lockstatus` - Show current locks
-• `/block [type]` - Bot admin version of lock
-• `/unblock [type]` - Bot admin version of unlock
-
-**Interactive Menu:**
-• `/lock` - Show lock menu (17 options)
-• `/unlock` - Show unlock menu
-
-"""
-    
-    # Add lock types
-    help_text += """
-🔐 **17 LOCK TYPES:**
-
-1. `all` - 🔒 Lock everything
-2. `text` - 📝 Text messages only
-3. `media` - 🖼️ All media messages
-4. `stickers` - 😀 Stickers & GIFs
-5. `polls` - 📊 Polls
-6. `invites` - 👥 Invite links
-7. `pins` - 📌 Pin messages
-8. `info` - ℹ️ Change chat info
-9. `url` - 🔗 URLs/links
-10. `games` - 🎮 Games
-11. `inline` - 🔍 Inline bots
-12. `voice` - 🎤 Voice messages
-13. `video` - 🎥 Video messages
-14. `audio` - 🎵 Audio messages
-15. `documents` - 📎 Documents
-16. `photos` - 📸 Photos only
-17. `forward` - 📨 Forwarded messages (auto-delete)
-
-"""
-    
-    # Add examples
-    help_text += """
-📝 **EXAMPLES:**
-
-1. **Lock everything:**
-   `/lock all`
-
-2. **Lock only text messages:**
-   `/lock text`
-
-3. **Lock media and stickers:**
-   `/lock media`
-   `/lock stickers`
-
-4. **Prevent URL sharing:**
-   `/lock url`
-
-5. **Stop forwarded messages:**
-   `/lock forward`
-
-6. **Check current locks:**
-   `/lockstatus`
-
-7. **Unlock everything:**
-   `/unlock all`
-
-8. **Unlock specific type:**
-   `/unlock text`
-
-"""
-    
-    # Add tips
-    help_text += """
-💡 **TIPS:**
-
-✅ **Use Cases:**
-• `/lock all` - During raids
-• `/lock forward` - Stop spam forwarding
-• `/lock url` - Prevent link sharing
-• `/lock media` - Text-only mode
-
-⚠️ **Notes:**
-• Locks apply to ALL regular members
-• Admins can bypass most locks
-• `forward` lock auto-deletes forwarded messages
-• Changes are immediate
-
-⚡ **Features:**
-• Interactive button menus
-• Real-time status checking
-• Works with bot admins too
-• Beautiful UI feedback
-
-🔧 **Permissions Required:**
-• Bot: Change Chat Info permission
-• User: Group admin OR bot admin
-
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("🗑️ Purge Help", callback_data="help_purge"),
-            InlineKeyboardButton("👤 Moderation", callback_data="help_mod")
-        ],
-        [
-            InlineKeyboardButton("🔒 Lock Menu", callback_data="lock_menu"),
-            InlineKeyboardButton("🔓 Unlock Menu", callback_data="unlock_menu")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Main Help", callback_data="help_main"),
-            InlineKeyboardButton("📊 Lock Status", callback_data="lockstatus")
-        ]
-    ]
-    
-    await message.reply_text(
-        help_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-# ================= HELP CALLBACK HANDLERS =================
-@app.on_callback_query(filters.regex("^help_"))
-async def help_callback_handler(client, cq):
-    """Handle help menu callbacks"""
-    
-    help_type = cq.data.split("_")[1]
-    
-    if help_type == "basic" or help_type == "public":
-        # Create a basic help message
-        basic_text = f"""
-{beautiful_header('info')}
-
-👤 **BASIC COMMANDS:**
-
-📱 **Information:**
-• `/start` - Start bot
-• `/help` - Full help
-• `/id` - Get IDs
-• `/info` - User info
-• `/rules` - Group rules
-
-🔔 **Support:**
-• Mention `@admin` for help
-• Reports go to all admins
-• Auto-response system
-
-🛡️ **Safety:**
-• Abuse detection
-• Flood protection
-• Link filtering
-• Auto-moderation
-
-⚙️ **Utilities:**
-• `/remind` - Set reminders
-• `/tagall` - Mention everyone
-• `/mystatus` - Your status
-• `/checkadmin` - Admin check
-        """
-        
-        await cq.message.edit_text(
-            basic_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📖 Full Help", callback_data="help_main")],
-                [InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")]
-            ])
-        )
-    
-    elif help_type == "purge":
-        await purge_help_command(client, cq.message)
-    
-    elif help_type == "lock":
-        await lock_help_command(client, cq.message)
-    
-    elif help_type == "main":
-        await complete_help_command(client, cq.message)
-    
-    elif help_type == "group_admin":
-        # Show group admin specific help
-        group_admin_text = f"""
-{beautiful_header('moderation')}
-
-🔧 **GROUP ADMIN COMMANDS:**
-
-🗑️ **Purge:**
-• `/purge` - Delete messages
-• `/del` - Delete single
-• `/cleanup` - Selective clean
-
-🔒 **Lock:**
-• `/lock` - Lock permissions
-• `/unlock` - Unlock
-• `/lockstatus` - Check status
-
-👤 **Moderation:**
-• `/mute` - Mute users
-• `/ban` - Ban users
-• `/warn` - Warn users
-• `/kick` - Kick users
-
-⚡ **Management:**
-• `/promote` - Make admin
-• `/demote` - Remove admin
-• `/setrules` - Set rules
-• `/setwelcome` - Welcome msg
-        """
-        
-        await cq.message.edit_text(
-            group_admin_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Purge Help", callback_data="help_purge")],
-                [InlineKeyboardButton("🔒 Lock Help", callback_data="help_lock")],
-                [InlineKeyboardButton("⬅️ Main Help", callback_data="help_main")]
-            ])
-        )
-    
-    elif help_type == "bot_admin":
-        await bot_admin_help_command(client, cq.message)
-    
-    elif help_type == "super_admin":
-        super_admin_text = f"""
-{beautiful_header('admin')}
-
-👑 **SUPER ADMIN COMMANDS:**
-
-👥 **Admin Management:**
-• `/addbotadmin` - Add bot admin
-• `/removebotadmin` - Remove
-• `/listbotadmins` - List all
-
-🗑️ **Nuclear Options:**
-• `/massdelete` - Delete ALL
-• `/clearchat` - Clear chat
-
-⚙️ **System:**
-• `/backup` - Database backup
-• `/health` - System health
-• Full bot control
-        """
-        
-        await cq.message.edit_text(
-            super_admin_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Main Help", callback_data="help_main")],
-                [InlineKeyboardButton("🤖 Bot Info", callback_data="bot_info")]
-            ])
-        )
-    
-    elif help_type == "mod":
-        mod_text = f"""
-{beautiful_header('moderation')}
-
-👤 **MODERATION COMMANDS:**
-
-⏰ **Mute:**
-• `/mute @user 2h Spamming`
-• `/mute` (reply) 30m
-• `/unmute @user`
-
-🚫 **Ban:**
-• `/ban @user Spam`
-• `/ban` (reply) Advertising
-• `/unban @user`
-
-⚠️ **Warn:**
-• `/warn @user Rule violation`
-• 3 warnings = auto-ban
-• Check with `/warns @user`
-
-👢 **Kick:**
-• `/kick @user Spamming`
-• Can rejoin with invite
-
-⚡ **Promote/Demote:**
-• `/promote @user Helper`
-• `/demote @user`
-• Set custom title
-        """
-        
-        await cq.message.edit_text(
-            mod_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Purge Help", callback_data="help_purge")],
-                [InlineKeyboardButton("🔒 Lock Help", callback_data="help_lock")],
-                [InlineKeyboardButton("⬅️ Main Help", callback_data="help_main")]
-            ])
-        )
-    
-    await cq.answer()
 
 # ================= STORE LOCK STATES PER CHAT =================
 chat_locks = {}
@@ -4952,747 +4428,6 @@ async def forward_lock_filter(client, message: Message):
 
 
 
-# ================= ENHANCED PURGE COMMANDS (NO LIMITS) =================
-@app.on_message(filters.command(["purge", "bpurge"]) & filters.group)
-async def enhanced_purge(client, message: Message):
-    """Enhanced purge command with no message limits"""
-    
-    # Check admin status
-    user_id = message.from_user.id
-    is_bot_admin_user = is_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, message.chat.id, user_id)
-    
-    command_prefix = message.command[0]
-    is_bot_command = command_prefix.startswith("b") and len(command_prefix) > 1
-    
-    # Check permissions
-    if is_bot_command:
-        if not is_bot_admin_user:
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Bot Admin Required**"
-                + beautiful_footer()
-            )
-            return
-    else:
-        if not (is_group_admin_user or is_bot_admin_user):
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Permission Denied**"
-                + beautiful_footer()
-            )
-            return
-    
-    # Check bot permissions
-    try:
-        bot_member = await client.get_chat_member(message.chat.id, "me")
-        if not (hasattr(bot_member, 'privileges') and bot_member.privileges.can_delete_messages):
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Bot Needs Delete Permission**"
-                + beautiful_footer()
-            )
-            return
-    except:
-        pass
-    
-    # Get purge count (0 = ALL MESSAGES)
-    purge_count = 0  # Default: All messages
-    if len(message.command) > 1:
-        try:
-            purge_count = int(message.command[1])
-            if purge_count < 0:
-                purge_count = 0  # All messages
-        except:
-            purge_count = 0
-    
-    # Check if replying to a message
-    if message.reply_to_message:
-        # Purge from replied message to current message
-        start_message_id = message.reply_to_message.id
-        end_message_id = message.id
-        
-        # Get admin type
-        admin_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
-        
-        # Send initial message
-        status_msg = await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"🧹 **MASS PURGE STARTED**\n\n"
-            f"⏳ **Mode:** Selective purge\n"
-            f"📊 **Target:** From replied message\n"
-            f"👨‍💼 **By:** {message.from_user.mention}\n"
-            f"🔄 **Status:** Fetching messages..."
-            f"{beautiful_footer()}"
-        )
-        
-        deleted_count = 0
-        total_fetched = 0
-        batch_size = 100
-        max_messages = 100000  # Very high limit
-        
-        try:
-            # Fetch messages between start and end
-            message_ids = []
-            async for msg in client.get_chat_history(
-                chat_id=message.chat.id,
-                limit=max_messages,
-                offset_id=end_message_id
-            ):
-                total_fetched += 1
-                
-                # Update status every 100 messages
-                if total_fetched % 100 == 0:
-                    try:
-                        await status_msg.edit_text(
-                            f"{beautiful_header('moderation')}\n\n"
-                            f"🧹 **PURGING IN PROGRESS**\n\n"
-                            f"⏳ **Mode:** Selective purge\n"
-                            f"📊 **Fetched:** {total_fetched} messages\n"
-                            f"🗑️ **Deleted:** {deleted_count} messages\n"
-                            f"👨‍💼 **By:** {message.from_user.mention}\n"
-                            f"🔄 **Status:** Processing..."
-                            f"{beautiful_footer()}"
-                        )
-                    except:
-                        pass
-                
-                if msg.id < start_message_id:
-                    break
-                
-                message_ids.append(msg.id)
-                
-                # Delete in batches of 100
-                if len(message_ids) >= batch_size:
-                    try:
-                        await client.delete_messages(
-                            chat_id=message.chat.id,
-                            message_ids=message_ids
-                        )
-                        deleted_count += len(message_ids)
-                        message_ids = []
-                        await asyncio.sleep(0.3)  # Small delay to avoid flood
-                    except Exception as e:
-                        print(f"Batch delete error: {e}")
-                        message_ids = []
-            
-            # Delete remaining messages
-            if message_ids:
-                try:
-                    await client.delete_messages(
-                        chat_id=message.chat.id,
-                        message_ids=message_ids
-                    )
-                    deleted_count += len(message_ids)
-                except:
-                    pass
-            
-            # Delete status message and command
-            try:
-                await status_msg.delete()
-            except:
-                pass
-            
-            try:
-                await message.delete()
-            except:
-                pass
-            
-            # Send completion message
-            completion = await message.chat.send_message(
-                f"{beautiful_header('moderation')}\n\n"
-                f"✅ **PURGE COMPLETE**\n\n"
-                f"📊 **Deleted:** {deleted_count} messages\n"
-                f"👨‍💼 **By:** {message.from_user.mention}\n"
-                f"🔧 **Admin Type:** {admin_type}\n"
-                f"🎯 **Mode:** Selective (replied range)\n\n"
-                f"🗑️ Messages have been permanently deleted."
-                f"{beautiful_footer()}"
-            )
-            
-            # Auto-delete completion after 10 seconds
-            await asyncio.sleep(10)
-            await completion.delete()
-            
-        except Exception as e:
-            await status_msg.edit_text(
-                f"{beautiful_header('moderation')}\n\n"
-                f"⚠️ **PURGE PARTIAL COMPLETE**\n\n"
-                f"📊 **Deleted:** {deleted_count} messages\n"
-                f"📊 **Fetched:** {total_fetched} messages\n"
-                f"❌ **Error:** {str(e)[:100]}\n\n"
-                f"Some messages may not have been deleted."
-                f"{beautiful_footer()}"
-            )
-    
-    else:
-        # Purge last N messages (or ALL if 0)
-        admin_type = "Bot Admin" if is_bot_admin_user else "Group Admin"
-        
-        if purge_count == 0:
-            purge_mode = "ALL MESSAGES"
-        else:
-            purge_mode = f"LAST {purge_count} MESSAGES"
-        
-        # Confirmation for mass purge
-        if purge_count == 0:
-            buttons = [
-                [
-                    InlineKeyboardButton("✅ YES, DELETE ALL", callback_data=f"confirm_purge_all:{message.id}"),
-                    InlineKeyboardButton("❌ CANCEL", callback_data="cancel_purge")
-                ]
-            ]
-            
-            await message.reply_text(
-                f"{beautiful_header('warning')}\n\n"
-                f"⚠️ **CRITICAL ACTION** ⚠️\n\n"
-                f"🔴 You are about to delete **ALL MESSAGES** in this chat!\n\n"
-                f"📊 **This action:**\n"
-                f"• Cannot be undone\n"
-                f"• Will delete thousands of messages\n"
-                f"• May take several minutes\n"
-                f"• Might cause temporary API limits\n\n"
-                f"👨‍💼 **Requested by:** {message.from_user.mention}\n\n"
-                f"**Are you absolutely sure?**"
-                f"{beautiful_footer()}",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            return
-        
-        # Start normal purge
-        status_msg = await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"🧹 **MASS PURGE STARTED**\n\n"
-            f"⏳ **Mode:** {purge_mode}\n"
-            f"👨‍💼 **By:** {message.from_user.mention}\n"
-            f"🔄 **Status:** Initializing..."
-            f"{beautiful_footer()}"
-        )
-        
-        deleted_count = 0
-        total_fetched = 0
-        batch_size = 100
-        
-        try:
-            # Get messages to delete
-            message_ids = []
-            async for msg in client.get_chat_history(
-                chat_id=message.chat.id,
-                limit=purge_count if purge_count > 0 else 100000  # Large number for "all"
-            ):
-                total_fetched += 1
-                
-                # Skip status and command messages
-                if msg.id == message.id or msg.id == status_msg.id:
-                    continue
-                
-                # Update progress
-                if total_fetched % 100 == 0:
-                    progress = min(100, (total_fetched / max(purge_count, 1000)) * 100) if purge_count > 0 else min(100, total_fetched / 1000)
-                    try:
-                        await status_msg.edit_text(
-                            f"{beautiful_header('moderation')}\n\n"
-                            f"🧹 **PURGING IN PROGRESS**\n\n"
-                            f"⏳ **Mode:** {purge_mode}\n"
-                            f"📊 **Fetched:** {total_fetched} messages\n"
-                            f"🗑️ **Deleted:** {deleted_count} messages\n"
-                            f"📈 **Progress:** {progress_bar(int(progress))}\n"
-                            f"👨‍💼 **By:** {message.from_user.mention}\n"
-                            f"🔄 **Status:** Deleting..."
-                            f"{beautiful_footer()}"
-                        )
-                    except:
-                        pass
-                
-                message_ids.append(msg.id)
-                
-                # Delete in batches
-                if len(message_ids) >= batch_size:
-                    try:
-                        await client.delete_messages(
-                            chat_id=message.chat.id,
-                            message_ids=message_ids
-                        )
-                        deleted_count += len(message_ids)
-                        message_ids = []
-                        await asyncio.sleep(0.3)
-                    except Exception as e:
-                        print(f"Batch delete error: {e}")
-                        message_ids = []
-                
-                # Stop if we reached the limit
-                if purge_count > 0 and total_fetched >= purge_count:
-                    break
-            
-            # Delete remaining
-            if message_ids:
-                try:
-                    await client.delete_messages(
-                        chat_id=message.chat.id,
-                        message_ids=message_ids
-                    )
-                    deleted_count += len(message_ids)
-                except:
-                    pass
-            
-            # Clean up
-            try:
-                await status_msg.delete()
-            except:
-                pass
-            
-            try:
-                await message.delete()
-            except:
-                pass
-            
-            # Completion message
-            completion = await message.chat.send_message(
-                f"{beautiful_header('moderation')}\n\n"
-                f"✅ **MASS PURGE COMPLETE**\n\n"
-                f"📊 **Deleted:** {deleted_count} messages\n"
-                f"👨‍💼 **By:** {message.from_user.mention}\n"
-                f"🔧 **Admin Type:** {admin_type}\n"
-                f"🎯 **Mode:** {purge_mode}\n\n"
-                f"🗑️ Chat has been cleaned successfully."
-                f"{beautiful_footer()}"
-            )
-            
-            await asyncio.sleep(10)
-            await completion.delete()
-            
-        except Exception as e:
-            await status_msg.edit_text(
-                f"{beautiful_header('moderation')}\n\n"
-                f"⚠️ **PURGE COMPLETED WITH ERRORS**\n\n"
-                f"📊 **Deleted:** {deleted_count} messages\n"
-                f"📊 **Target:** {purge_mode}\n"
-                f"❌ **Error:** {str(e)[:150]}\n\n"
-                f"Most messages have been deleted."
-                f"{beautiful_footer()}"
-               )
-              
-
-# ================= MASS DELETE (SPECIAL) =================
-@app.on_message(filters.command(["massdelete", "clearchat"]) & filters.group)
-async def mass_delete_all(client, message: Message):
-    """Delete ALL messages in chat (requires confirmation)"""
-    
-    # Only super admin and bot admins
-    user_id = message.from_user.id
-    if not is_admin(user_id):
-        await message.reply_text(
-            f"{beautiful_header('warning')}\n\n"
-            "❌ **Super Admin Only**\n"
-            "This command requires bot admin privileges."
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    # Check bot permissions
-    try:
-        bot_member = await client.get_chat_member(message.chat.id, "me")
-        if not (hasattr(bot_member, 'privileges') and bot_member.privileges.can_delete_messages):
-            await message.reply_text(
-                f"{beautiful_header('warning')}\n\n"
-                "❌ **Bot Needs Delete Permission**"
-                f"{beautiful_footer()}"
-            )
-            return
-    except:
-        pass
-    
-    # Confirmation with scary warning
-    buttons = [
-        [
-            InlineKeyboardButton("🔥 DELETE EVERYTHING", callback_data=f"mass_delete_confirm:{message.id}"),
-            InlineKeyboardButton("❌ CANCEL", callback_data="cancel_mass_delete")
-        ],
-        [
-            InlineKeyboardButton("⚠️ I UNDERSTAND THE RISK", callback_data="understand_risk")
-        ]
-    ]
-    
-    await message.reply_text(
-        f"{beautiful_header('danger')}\n\n"
-        f"☢️ **EXTREME DANGER - MASS DESTRUCTION** ☢️\n\n"
-        f"🔴 **YOU ARE ABOUT TO:**\n"
-        f"• Delete **EVERY SINGLE MESSAGE** in this chat\n"
-        f"• Remove **ALL history** permanently\n"
-        f"• This action is **IRREVERSIBLE**\n"
-        f"• May take **5-10 minutes** depending on chat size\n"
-        f"• Bot may hit **API limits** temporarily\n\n"
-        f"📊 **Estimated impact:**\n"
-        f"• 1000s of messages deleted\n"
-        f"• Chat will appear empty\n"
-        f"• Only pinned messages remain\n\n"
-        f"👑 **Requested by:** {message.from_user.mention} (Super Admin)\n\n"
-        f"**Type `CONFIRM DELETE ALL` to proceed:**"
-        f"{beautiful_footer()}"
-    )
-
-# ================= CLEANUP COMMANDS =================
-@app.on_message(filters.command(["cleanup", "clean"]) & filters.group)
-async def cleanup_chat(client, message: Message):
-    """Cleanup various types of messages"""
-    
-    user_id = message.from_user.id
-    is_bot_admin_user = is_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, message.chat.id, user_id)
-    
-    if not (is_group_admin_user or is_bot_admin_user):
-        await message.reply_text("❌ Permission denied!")
-        return
-    
-    # Show cleanup options
-    buttons = [
-        [
-            InlineKeyboardButton("🤖 Bot Messages", callback_data="cleanup:bots"),
-            InlineKeyboardButton("📎 Service Messages", callback_data="cleanup:service")
-        ],
-        [
-            InlineKeyboardButton("🔗 Links Only", callback_data="cleanup:links"),
-            InlineKeyboardButton("🖼️ Media Only", callback_data="cleanup:media")
-        ],
-        [
-            InlineKeyboardButton("🎮 Games & Bots", callback_data="cleanup:games"),
-            InlineKeyboardButton("😀 Stickers", callback_data="cleanup:stickers")
-        ],
-        [
-            InlineKeyboardButton("🗑️ Delete ALL", callback_data="cleanup:all"),
-            InlineKeyboardButton("❌ Cancel", callback_data="cleanup:cancel")
-        ]
-    ]
-    
-    await message.reply_text(
-        f"{beautiful_header('moderation')}\n\n"
-        "🧹 **CHAT CLEANUP OPTIONS**\n\n"
-        "Select what you want to clean:\n\n"
-        "• **🤖 Bot Messages** - Delete all bot messages\n"
-        "• **📎 Service Messages** - Join/leave messages\n"
-        "• **🔗 Links Only** - Delete only URLs\n"
-        "• **🖼️ Media Only** - Delete photos/videos\n"
-        "• **🎮 Games & Bots** - Game and bot messages\n"
-        "• **😀 Stickers** - Delete all stickers\n"
-        "• **🗑️ Delete ALL** - Extreme cleanup\n\n"
-        "⚠️ This may take time for large chats"
-        f"{beautiful_footer()}",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-# ================= PURGE CALLBACK HANDLERS =================
-@app.on_callback_query(filters.regex("^confirm_purge_all:"))
-async def confirm_purge_all_callback(client, cq):
-    """Confirm and execute mass purge"""
-    
-    message_id = int(cq.data.split(":")[1])
-    chat_id = cq.message.chat.id
-    user_id = cq.from_user.id
-    
-    # Check permissions
-    is_bot_admin_user = is_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
-    
-    if not (is_group_admin_user or is_bot_admin_user):
-        await cq.answer("Permission denied!", show_alert=True)
-        return
-    
-    await cq.message.edit_text(
-        f"{beautiful_header('moderation')}\n\n"
-        "🔄 **STARTING MASS PURGE**\n\n"
-        "⏳ Please wait, this will take time...\n"
-        "📊 Processing thousands of messages\n"
-        "🔄 Estimated: 1-5 minutes"
-        f"{beautiful_footer()}"
-    )
-    
-    # Get the original command message
-    try:
-        original_msg = await client.get_messages(chat_id, message_id)
-    except:
-        original_msg = None
-    
-    # Execute purge with count=0 (all messages)
-    if original_msg:
-        original_msg.command = ["purge", "0"]
-        await enhanced_purge(client, original_msg)
-    
-    await cq.answer("Mass purge started!")
-
-@app.on_callback_query(filters.regex("^cancel_purge$"))
-async def cancel_purge_callback(client, cq):
-    """Cancel purge operation"""
-    await cq.message.edit_text(
-        f"{beautiful_header('moderation')}\n\n"
-        "✅ **PURGE CANCELLED**\n\n"
-        "No messages were deleted.\n"
-        "Operation cancelled by user."
-        f"{beautiful_footer()}"
-    )
-    await cq.answer("Purge cancelled")
-
-@app.on_callback_query(filters.regex("^mass_delete_confirm:"))
-async def mass_delete_confirm_callback(client, cq):
-    """Confirm mass delete all"""
-    
-    message_id = int(cq.data.split(":")[1])
-    chat_id = cq.message.chat.id
-    
-    # Only super admin
-    if cq.from_user.id != SUPER_ADMIN:
-        await cq.answer("Only super admin can do this!", show_alert=True)
-        return
-    
-    # Ask for confirmation text
-    await cq.message.edit_text(
-        f"{beautiful_header('danger')}\n\n"
-        "☢️ **FINAL CONFIRMATION REQUIRED** ☢️\n\n"
-        "Type the following exact text:\n\n"
-        "`CONFIRM DELETE ALL`\n\n"
-        "This is your last chance to cancel.\n"
-        "After this, ALL messages will be gone forever."
-        f"{beautiful_footer()}"
-    )
-    
-    # Store the request
-    cur.execute(
-        "INSERT OR REPLACE INTO mass_delete_pending (chat_id, admin_id, message_id) VALUES (?, ?, ?)",
-        (chat_id, cq.from_user.id, message_id)
-    )
-    conn.commit()
-    
-    await cq.answer("Type CONFIRM DELETE ALL to proceed")
-
-@app.on_callback_query(filters.regex("^understand_risk$"))
-async def understand_risk_callback(client, cq):
-    """User acknowledges the risk"""
-    await cq.answer(
-        "⚠️ You understand this will delete EVERYTHING.\n"
-        "Click 'DELETE EVERYTHING' to proceed.",
-        show_alert=True
-    )
-
-@app.on_callback_query(filters.regex("^cancel_mass_delete$"))
-async def cancel_mass_delete_callback(client, cq):
-    """Cancel mass delete"""
-    await cq.message.edit_text(
-        f"{beautiful_header('moderation')}\n\n"
-        "✅ **MASS DELETE CANCELLED**\n\n"
-        "No messages were deleted.\n"
-        "Chat history is safe."
-        f"{beautiful_footer()}"
-    )
-    await cq.answer("Mass delete cancelled")
-
-@app.on_callback_query(filters.regex("^cleanup:"))
-async def cleanup_callback_handler(client, cq):
-    """Handle cleanup callbacks"""
-    
-    cleanup_type = cq.data.split(":")[1]
-    chat_id = cq.message.chat.id
-    user_id = cq.from_user.id
-    
-    if cleanup_type == "cancel":
-        await cq.message.delete()
-        await cq.answer("Cancelled")
-        return
-    
-    # Check permissions
-    is_bot_admin_user = is_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
-    
-    if not (is_group_admin_user or is_bot_admin_user):
-        await cq.answer("Permission denied!", show_alert=True)
-        return
-    
-    # Start cleanup
-    status_msg = await cq.message.edit_text(
-        f"{beautiful_header('moderation')}\n\n"
-        f"🧹 **CLEANUP STARTED: {cleanup_type.upper()}**\n\n"
-        f"⏳ Fetching messages...\n"
-        f"🔄 This may take time"
-        f"{beautiful_footer()}"
-    )
-    
-    deleted_count = 0
-    batch_size = 100
-    message_ids = []
-    
-    try:
-        async for msg in client.get_chat_history(chat_id, limit=10000):  # Last 10k messages
-            should_delete = False
-            
-            if cleanup_type == "bots" and (msg.from_user and msg.from_user.is_bot):
-                should_delete = True
-            elif cleanup_type == "service" and msg.service:
-                should_delete = True
-            elif cleanup_type == "links" and msg.text and "http" in msg.text.lower():
-                should_delete = True
-            elif cleanup_type == "media" and (msg.photo or msg.video or msg.document):
-                should_delete = True
-            elif cleanup_type == "games" and msg.game:
-                should_delete = True
-            elif cleanup_type == "stickers" and msg.sticker:
-                should_delete = True
-            elif cleanup_type == "all":
-                should_delete = True
-            
-            if should_delete and msg.id != status_msg.id:
-                message_ids.append(msg.id)
-                
-                if len(message_ids) >= batch_size:
-                    try:
-                        await client.delete_messages(chat_id, message_ids)
-                        deleted_count += len(message_ids)
-                        message_ids = []
-                        await asyncio.sleep(0.3)
-                    except:
-                        message_ids = []
-        
-        # Delete remaining
-        if message_ids:
-            try:
-                await client.delete_messages(chat_id, message_ids)
-                deleted_count += len(message_ids)
-            except:
-                pass
-        
-        await status_msg.edit_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"✅ **CLEANUP COMPLETE**\n\n"
-            f"🧹 **Type:** {cleanup_type.upper()}\n"
-            f"📊 **Deleted:** {deleted_count} messages\n"
-            f"👨‍💼 **By:** {cq.from_user.mention}\n\n"
-            f"Chat has been cleaned successfully."
-            f"{beautiful_footer()}"
-        )
-        
-    except Exception as e:
-        await status_msg.edit_text(
-            f"{beautiful_header('moderation')}\n\n"
-            f"⚠️ **CLEANUP PARTIAL**\n\n"
-            f"📊 **Deleted:** {deleted_count} messages\n"
-            f"❌ **Error:** {str(e)[:100]}"
-            f"{beautiful_footer()}"
-        )
-    
-    await cq.answer(f"Cleanup complete: {deleted_count} messages")
-
-
-# ================= TEXT CONFIRMATION HANDLER =================
-@app.on_message(filters.group & filters.text)
-async def mass_delete_text_confirmation(client, message: Message):
-    """Handle text confirmation for mass delete"""
-    
-    if message.text.strip() == "CONFIRM DELETE ALL":
-        # Check if this user has a pending mass delete
-        cur.execute(
-            "SELECT message_id FROM mass_delete_pending WHERE chat_id=? AND admin_id=?",
-            (message.chat.id, message.from_user.id)
-        )
-        row = cur.fetchone()
-        
-        if row and message.from_user.id == SUPER_ADMIN:
-            message_id = row[0]
-            
-            # Delete confirmation message
-            await message.delete()
-            
-            # Execute mass delete
-            status_msg = await message.reply_text(
-                f"{beautiful_header('danger')}\n\n"
-                "☢️ **NUCLEAR LAUNCH DETECTED** ☢️\n\n"
-                "🔄 **DELETING EVERYTHING**\n"
-                "⏳ This will take several minutes...\n"
-                "📊 Processing ALL messages\n"
-                "🔥 Chat history will be erased"
-                f"{beautiful_footer()}"
-            )
-            
-            # Get original command
-            try:
-                original_msg = await client.get_messages(message.chat.id, message_id)
-            except:
-                original_msg = None
-            
-            deleted_count = 0
-            batch_size = 100
-            
-            try:
-                # Delete ALL messages (no limit)
-                message_ids = []
-                async for msg in client.get_chat_history(message.chat.id, limit=1000000):  # 1 million limit
-                    if msg.id == status_msg.id:
-                        continue
-                    
-                    message_ids.append(msg.id)
-                    
-                    if len(message_ids) >= batch_size:
-                        try:
-                            await client.delete_messages(message.chat.id, message_ids)
-                            deleted_count += len(message_ids)
-                            message_ids = []
-                            
-                            # Update status every 500 messages
-                            if deleted_count % 500 == 0:
-                                try:
-                                    await status_msg.edit_text(
-                                        f"{beautiful_header('danger')}\n\n"
-                                        "☢️ **MASS DESTRUCTION IN PROGRESS** ☢️\n\n"
-                                        f"📊 **Deleted:** {deleted_count} messages\n"
-                                        f"⏳ **Progress:** {progress_bar(min(100, deleted_count/5000))}\n"
-                                        f"🔄 **Status:** Erasing history..."
-                                        f"{beautiful_footer()}"
-                                    )
-                                except:
-                                    pass
-                            
-                            await asyncio.sleep(0.5)
-                        except Exception as e:
-                            print(f"Mass delete batch error: {e}")
-                            message_ids = []
-                
-                # Final batch
-                if message_ids:
-                    try:
-                        await client.delete_messages(message.chat.id, message_ids)
-                        deleted_count += len(message_ids)
-                    except:
-                        pass
-                
-                # Final message
-                await status_msg.edit_text(
-                    f"{beautiful_header('moderation')}\n\n"
-                    "✅ **CHAT HISTORY ERASED**\n\n"
-                    f"📊 **Total deleted:** {deleted_count} messages\n"
-                    f"👑 **By:** {message.from_user.mention} (Super Admin)\n"
-                    f"🕒 **Time:** {datetime.now().strftime('%H:%M:%S')}\n\n"
-                    f"💬 Chat has been completely wiped clean.\n"
-                    f"📝 New conversations can begin."
-                    f"{beautiful_footer()}"
-                )
-                
-                # Clear pending request
-                cur.execute(
-                    "DELETE FROM mass_delete_pending WHERE chat_id=? AND admin_id=?",
-                    (message.chat.id, message.from_user.id)
-                )
-                conn.commit()
-                
-            except Exception as e:
-                await status_msg.edit_text(
-                    f"{beautiful_header('moderation')}\n\n"
-                    f"⚠️ **PARTIAL ERASE COMPLETE**\n\n"
-                    f"📊 **Deleted:** {deleted_count} messages\n"
-                    f"❌ **Error:** {str(e)[:150]}\n\n"
-                    f"Most messages have been deleted."
-                    f"{beautiful_footer()}"
-                )
-
-
-
-
 # ================= ADMIN PROMOTION SYSTEM (COMPLETE) =================
 from pyrogram import filters
 from pyrogram.types import Message, ChatPrivileges
@@ -5877,280 +4612,6 @@ async def demote_command(client, message: Message):
         f"{beautiful_footer()}"
     )
 
-# ================= ADMIN LIST COMMAND =================
-@app.on_message(filters.command("admins") & filters.group)
-async def enhanced_admins_command(client, message: Message):
-    """Enhanced admin list with detailed information"""
-    
-    try:
-        admins_list = []
-        owner = None
-        
-        # Get all admins
-        async for member in client.get_chat_members(message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.user.is_bot:
-                continue
-            
-            # Get admin info
-            user = member.user
-            status = member.status.value.title()
-            title = getattr(member, 'custom_title', 'Admin')
-            
-            # Check bot admin status
-            is_bot_admin_user = is_admin(user.id)
-            
-            # Format admin info
-            if member.status == ChatMemberStatus.OWNER:
-                owner = f"👑 **Owner:** {user.mention}"
-                if title != 'Admin':
-                    owner += f" ({title})"
-                if is_bot_admin_user:
-                    owner += " ⚡"
-            else:
-                admin_info = f"⚡ **Admin:** {user.mention}"
-                if title != 'Admin':
-                    admin_info += f" ({title})"
-                if is_bot_admin_user:
-                    admin_info += " 🤖"
-                admins_list.append(admin_info)
-        
-        # Build admin list text
-        admin_text = f"""
-{beautiful_header('info')}
-
-👥 **GROUP ADMINISTRATORS**
-
-"""
-        
-        if owner:
-            admin_text += f"{owner}\n\n"
-        
-        if admins_list:
-            admin_text += "**Admins:**\n"
-            for i, admin in enumerate(admins_list, 1):
-                admin_text += f"{i}. {admin}\n"
-        else:
-            admin_text += "📭 **No other admins**\n"
-        
-        # Count totals
-        total_admins = len(admins_list) + (1 if owner else 0)
-        admin_text += f"\n📊 **Total Admins:** {total_admins}"
-        
-        # Check user permissions for buttons
-        can_user_promote = await can_user_restrict(client, message.chat.id, message.from_user.id)
-        is_user_bot_admin = is_admin(message.from_user.id)
-        
-        buttons = []
-        if can_user_promote or is_user_bot_admin:
-            buttons.append([
-                InlineKeyboardButton("⬆️ Promote", callback_data="promote_menu"),
-                InlineKeyboardButton("📉 Demote", callback_data="demote_menu")
-            ])
-        
-        buttons.append([
-            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_admins"),
-            InlineKeyboardButton("📊 Chat Info", callback_data=f"chat_info:{message.chat.id}")
-        ])
-        
-        await message.reply_text(
-            admin_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-    except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('info')}\n\n"
-            f"❌ **Error:** {str(e)[:100]}"
-            f"{beautiful_footer()}"
-        )
-
-
-# ================= PROMOTE FROM CALLBACK =================
-@app.on_callback_query(filters.regex("^promote_menu$"))
-async def promote_menu_callback(client, cq):
-    """Show promote menu with instructions"""
-    
-    # Check admin type
-    is_bot_admin, is_group_admin, admin_type = await check_admin_type(
-        client, cq.message.chat.id, cq.from_user.id
-    )
-    
-    if not (is_group_admin or is_bot_admin):
-        await cq.answer("❌ Permission denied!", show_alert=True)
-        return
-    
-    menu_text = f"""
-{beautiful_header('admin')}
-
-⬆️ **PROMOTE USER TO ADMIN**
-
-📋 **3 Methods to Promote:**
-
-1. **Reply Method:**
-   Reply to user's message with:
-   `/promote [title]`
-   
-2. **Username Method:**
-   `/promote @username [title]`
-   
-3. **User ID Method:**
-   `/promote 1234567890 [title]`
-
-🎯 **Recommended Titles:**
-• Helper • Moderator • Admin • Manager
-
-🔧 **Default Permissions:**
-• Delete messages
-• Restrict users  
-• Invite users
-• Pin messages
-• Change group info
-"""
-    
-    # Show admin type
-    if is_bot_admin:
-        menu_text += f"\n🤖 **Your Level:** Bot Admin (Can promote anywhere)"
-    elif is_group_admin:
-        menu_text += f"\n🔧 **Your Level:** Group Admin (This group only)"
-    
-    buttons = [
-        [
-            InlineKeyboardButton("👥 Admin List", callback_data="admin_list"),
-            InlineKeyboardButton("📋 How to Use", callback_data="promote_help")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back", callback_data="moderation_menu"),
-            InlineKeyboardButton("✅ Done", callback_data="dismiss")
-        ]
-    ]
-    
-    await cq.message.edit_text(
-        menu_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    
-    await cq.answer()
-            
-# ================= PROMOTE FROM USER INFO =================
-@app.on_callback_query(filters.regex("^promote_user:"))
-async def promote_from_user_info(client, cq):
-    """Promote user from user info callback"""
-    
-    try:
-        parts = cq.data.split(":")
-        target_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Get user info
-        user = await client.get_users(target_id)
-        chat = await client.get_chat(chat_id)
-        
-        # Check permissions
-        if not is_admin(cq.from_user.id):
-            await cq.answer("Bot admin required!", show_alert=True)
-            return
-        
-        # Show promotion options
-        buttons = [
-            [
-                InlineKeyboardButton("⚡ Regular Admin", callback_data=f"promote_type:{target_id}:{chat_id}:regular"),
-                InlineKeyboardButton("🤖 Bot Admin", callback_data=f"promote_type:{target_id}:{chat_id}:bot")
-            ],
-            [
-                InlineKeyboardButton("👑 Full Admin", callback_data=f"promote_type:{target_id}:{chat_id}:full"),
-                InlineKeyboardButton("🔧 Custom", callback_data=f"promote_custom:{target_id}:{chat_id}")
-            ],
-            [
-                InlineKeyboardButton("❌ Cancel", callback_data="cancel_promote")
-            ]
-        ]
-        
-        await cq.message.edit_text(
-            f"{beautiful_header('admin')}\n\n"
-            f"⚡ **PROMOTE {user.first_name}**\n\n"
-            f"👤 **User:** {user.mention}\n"
-            f"💬 **Group:** {chat.title}\n\n"
-            f"Select promotion type:"
-            + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-        await cq.answer()
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-# ================= ADMIN LIST COMMAND =================
-@app.on_message(filters.command("admins") & filters.group)
-async def list_admins_command(client, message: Message):
-    """List all group admins"""
-    
-    try:
-        admin_list = []
-        owner = None
-        
-        # Get all admins
-        async for member in client.get_chat_members(message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.user.is_bot:
-                continue
-            
-            if member.status == ChatMemberStatus.OWNER:
-                owner = f"👑 **Owner:** {member.user.mention}"
-                if hasattr(member, 'custom_title') and member.custom_title:
-                    owner += f" ({member.custom_title})"
-            elif member.status == ChatMemberStatus.ADMINISTRATOR:
-                admin_info = f"⚡ **Admin:** {member.user.mention}"
-                if hasattr(member, 'custom_title') and member.custom_title:
-                    admin_info += f" ({member.custom_title})"
-                admin_list.append(admin_info)
-        
-        # Build admin list text
-        admin_text = f"""
-{beautiful_header('info')}
-
-👥 **GROUP ADMINISTRATORS**
-
-"""
-        
-        if owner:
-            admin_text += f"{owner}\n\n"
-        
-        if admin_list:
-            admin_text += "**Admins:**\n"
-            for i, admin in enumerate(admin_list, 1):
-                admin_text += f"{i}. {admin}\n"
-        else:
-            admin_text += "📭 **No other admins**\n"
-        
-        # Count totals
-        total_admins = len(admin_list) + (1 if owner else 0)
-        admin_text += f"\n📊 **Total Admins:** {total_admins}"
-        
-        # Add quick action buttons
-        buttons = []
-        if await can_user_promote(client, message.chat.id, message.from_user.id):
-            buttons.append([
-                InlineKeyboardButton("⬆️ Promote User", callback_data="promote_menu"),
-                InlineKeyboardButton("📉 Demote Admin", callback_data="demote_menu")
-            ])
-        
-        buttons.append([
-            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_admins"),
-            InlineKeyboardButton("📊 Group Info", callback_data=f"chat_info:{message.chat.id}")
-        ])
-        
-        await message.reply_text(
-            admin_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-    except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('info')}\n\n"
-            f"❌ **Error loading admins:** {str(e)[:100]}"
-            f"{beautiful_footer()}"
-        )
 
 
 # ================= HELPER FUNCTIONS =================
@@ -6179,174 +4640,6 @@ async def can_bot_promote(client, chat_id):
     """Check if bot can promote members"""
     return await can_user_promote(client, chat_id, "me")
 
-
-# ================= CALLBACK HANDLERS =================
-@app.on_callback_query(filters.regex("^promote_menu$"))
-async def promote_menu_callback(client, cq):
-    """Show promote menu"""
-    if not await can_user_promote(client, cq.message.chat.id, cq.from_user.id):
-        await cq.answer("❌ You can't promote users!", show_alert=True)
-        return
-    
-    menu_text = f"""
-{beautiful_header('moderation')}
-
-⬆️ **PROMOTE USER TO ADMIN**
-
-📋 **How to promote:**
-1. Reply to user's message with `/promote [title]`
-2. Use `/promote @username [title]`
-3. Click buttons below for quick actions
-
-🎯 **Recommended Titles:**
-• Helper
-• Moderator  
-• Admin
-• Manager
-
-🔧 **Default Permissions:**
-• Delete messages
-• Restrict users
-• Invite users
-• Pin messages
-• Change group info
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("👥 Admin List", callback_data="admin_list"),
-            InlineKeyboardButton("📋 How to Use", callback_data="promote_help")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back", callback_data="moderation_menu"),
-            InlineKeyboardButton("✅ Done", callback_data="dismiss")
-        ]
-    ]
-    
-    await cq.message.edit_text(
-        menu_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    
-    await cq.answer()
-
-
-@app.on_callback_query(filters.regex("^promote_menu:"))
-async def promote_user_callback(client, cq):
-    """Quick promote from callback"""
-    if not await can_user_promote(client, cq.message.chat.id, cq.from_user.id):
-        await cq.answer("❌ You can't promote users!", show_alert=True)
-        return
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        user = await client.get_users(user_id)
-        
-        # Ask for title
-        await cq.message.edit_text(
-            f"**Promote {user.mention} to Admin**\n\n"
-            f"Please reply with the admin title (e.g., Helper, Moderator):\n"
-            f"Or type `cancel` to cancel.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_promote")]
-            ])
-        )
-        
-        # Store promotion request
-        promotion_requests[f"{cq.from_user.id}:{chat_id}:{user_id}"] = {
-            "message_id": cq.message.id,
-            "user": user
-        }
-        
-        await cq.answer("Please enter admin title")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-@app.on_callback_query(filters.regex("^admin_info:"))
-async def admin_info_callback(client, cq):
-    """Show admin information"""
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        user = await client.get_users(user_id)
-        member = await client.get_chat_member(chat_id, user_id)
-        
-        # Get promotion history
-        cur.execute(
-            """
-            SELECT promoted_by, title, promoted_at 
-            FROM admin_promotions 
-            WHERE chat_id=? AND user_id=? 
-            ORDER BY promoted_at DESC LIMIT 1
-            """,
-            (chat_id, user_id)
-        )
-        promo_data = cur.fetchone()
-        
-        if promo_data:
-            promoted_by_id, title, promoted_at = promo_data
-            try:
-                promoter = await client.get_users(promoted_by_id)
-                promoted_by = promoter.mention
-            except:
-                promoted_by = f"User {promoted_by_id}"
-        else:
-            title = member.custom_title or "No title"
-            promoted_by = "Unknown"
-            promoted_at = "Unknown"
-        
-        # Get permissions
-        permissions = {}
-        if hasattr(member, 'privileges'):
-            priv = member.privileges
-            permissions = {
-                "change_info": priv.can_change_info,
-                "delete_messages": priv.can_delete_messages,
-                "restrict_members": priv.can_restrict_members,
-                "invite_users": priv.can_invite_users,
-                "pin_messages": priv.can_pin_messages,
-                "promote_members": priv.can_promote_members,
-                "manage_video_chats": priv.can_manage_video_chats,
-                "anonymous": priv.is_anonymous
-            }
-        
-        # Create info card
-        info_card = admin_info_card(
-            user_mention=user.mention,
-            user_id=user_id,
-            title=title,
-            permissions=permissions,
-            promoted_by=promoted_by,
-            promoted_at=promoted_at[:16] if promoted_at != "Unknown" else "Unknown"
-        )
-        
-        buttons = [
-            [
-                InlineKeyboardButton("📉 Demote", callback_data=f"demote_menu:{user_id}:{chat_id}"),
-                InlineKeyboardButton("👤 User Info", callback_data=f"userinfo:{user_id}")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Back", callback_data="admin_list"),
-                InlineKeyboardButton("✅ Done", callback_data="dismiss")
-            ]
-        ]
-        
-        await cq.message.edit_text(
-            info_card,
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
-        await cq.answer("Admin info loaded")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
 
 
 # ================= PROMOTION REQUEST STORAGE =================
@@ -7255,576 +5548,530 @@ async def cleanup_abuse_cache_task():
 
 
             
-# ================= AUTO REPORT ON @admin MENTION (FINAL VERSION) =========
+# ================= TAG FUNCTION, PURGE FUNCTION, ADMIN REPORT FUNCTION =========
 
-# ================= CONFIGURATION =================
-ADMIN_PING_COOLDOWN = 120  # 2 minutes cooldown per user
+# ================== IMPORTS ==================
 
-ADMIN_KEYWORDS = [
-    # English keywords
-    "admin", "admins", "administrator", "moderator", "mod", "mods",
-    "help", "support", "report", "complaint", "issue", "problem",
-    "emergency", "urgent", "assistance", "attention", "please help",
-    "need help", "help needed", "help me", "someone help",
-    
-    # Hindi/Romanized Hindi keywords
-    "admin ji", "admin sir", "admin bhai", "admin help",
-    "help admin", "admins please", "admins help", "admins bulao",
-    "admin bulao", "call admin", "admin call", "admin ko bulao",
-    "admin aao", "aao admin", "admin attention", "attention admin",
-    
-    # Contextual keywords
-    "who is admin", "admin where", "where admin", "admin online",
-    "any admin", "admin anyone", "admin available", "available admin",
-    "admin help needed", "admin support needed", "admin emergency",
-    "admin urgent", "urgent admin", "emergency admin"
-]
+TAG_LIMIT = 5          # per message
+DELAY = 2              # seconds
+COOLDOWN = 120         # seconds
 
-# Create regex pattern for keyword matching
-ADMIN_KEYWORD_REGEX = re.compile(
-    r"\b(" + "|".join(map(re.escape, ADMIN_KEYWORDS)) + r")\b",
-    re.IGNORECASE
-)
+PURGE_REPORT_DELETE_AFTER = 15  # seconds
 
+STOP_TAG = set()
 
-# ================= ADMIN KEYWORD DETECTOR =================
-@app.on_message(filters.group & (filters.text | filters.caption))
-async def admin_keyword_detector(client, message: Message):
-    """Detect admin-related keywords and notify admins"""
-    
-    # Skip if no user or bot
-    if not message.from_user or message.from_user.is_bot:
-        return
-    
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    # Skip if user is admin/owner
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            return
-    except:
-        pass  # Skip if can't check status
-    
-    # Get message text
-    text = (message.text or message.caption or "").lower()
-    
-    # Skip if no admin keywords found
-    if not ADMIN_KEYWORD_REGEX.search(text):
-        return
-    
-    # Check cooldown
-    now = int(time.time())
-    cur.execute(
-        "SELECT last_ping FROM admin_ping_cooldown WHERE chat_id=? AND user_id=?",
-        (chat_id, user_id)
-    )
+# ================== HELPERS ==================
+def is_on_cooldown(user_id):
+    cur.execute("SELECT last_used FROM cooldown WHERE user_id=?", (user_id,))
     row = cur.fetchone()
-    
-    if row and (now - row[0]) < ADMIN_PING_COOLDOWN:
-        # Still in cooldown
-        remaining = ADMIN_PING_COOLDOWN - (now - row[0])
-        minutes = remaining // 60
-        seconds = remaining % 60
-        
-        try:
-            # Send cooldown reminder
-            reminder = await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                "⏳ **Cooldown Active**\n\n"
-                f"You recently requested admin attention.\n"
-                f"Please wait **{minutes}m {seconds}s** before requesting again.\n\n"
-                "🛡️ **This prevents spam.**"
-                f"{beautiful_footer()}"
-            )
-            # Auto-delete reminder after 8 seconds
-            await asyncio.sleep(8)
-            await reminder.delete()
-        except:
-            pass
-        return
-    
-    # Update cooldown
+    if not row:
+        return False
+    return time.time() - row[0] < COOLDOWN
+
+def update_cooldown(user_id):
     cur.execute(
-        "INSERT OR REPLACE INTO admin_ping_cooldown (chat_id, user_id, last_ping) VALUES (?, ?, ?)",
-        (chat_id, user_id, now)
+        "REPLACE INTO cooldown VALUES (?,?)",
+        (user_id, int(time.time()))
     )
     conn.commit()
-    
-    # Fetch all admins
-    admin_mentions = []
-    admin_names = []
-    
+
+async def is_admin(client, chat_id, user_id):
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if m.user and m.user.id == user_id:
+            return True
+    return False
+
+
+
+async def can_purge(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return True
     try:
-        async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if not member.user.is_bot:
-                if member.status == ChatMemberStatus.OWNER:
-                    admin_mentions.append(f"👑 **Owner:** {member.user.mention}")
-                    admin_names.append(f"👑 {member.user.first_name}")
-                else:
-                    title = getattr(member, 'custom_title', 'Admin')
-                    admin_mentions.append(f"⚡ **{title}:** {member.user.mention}")
-                    admin_names.append(f"⚡ {member.user.first_name}")
-    except Exception as e:
-        print(f"Error fetching admins: {e}")
-        admin_mentions = ["⚠️ Could not fetch admin list"]
-        admin_names = ["Admins"]
-    
-    # Create admin mentions string
-    admin_mention_text = "\n".join(admin_mentions[:10])  # Limit to 10 admins
-    
-    # Message preview (truncated)
-    msg_preview = (message.text or message.caption or "📎 Media message")
-    if len(msg_preview) > 150:
-        msg_preview = msg_preview[:150] + "..."
-    
-    # Create detection reason
-    matched_keywords = []
-    for keyword in ADMIN_KEYWORDS:
-        if re.search(r'\b' + re.escape(keyword) + r'\b', text, re.IGNORECASE):
-            matched_keywords.append(keyword)
-            if len(matched_keywords) >= 3:
-                break
-    
-    detection_reason = f"Keywords detected: {', '.join(matched_keywords[:3])}"
-    
-    # Send user feedback
-    user_feedback = await message.reply_text(
-        f"{beautiful_header('admin')}\n\n"
-        "🚨 **Admin Alert Triggered**\n\n"
-        f"👤 **User:** {message.from_user.mention}\n"
-        f"💬 **Message:** {msg_preview}\n"
-        f"🔍 **Reason:** {detection_reason}\n\n"
-        "✅ **Admins have been notified.**\n"
-        "⏳ **Cooldown:** 2 minutes\n\n"
-        f"👮 **Available Admins:**\n{admin_mention_text}"
-        f"{beautiful_footer()}"
-    )
-    
-    # Send detailed notification to all admins
-    await notify_admins_about_keyword_detection(
-        client, message, admin_names, matched_keywords
-    )
-    
-    # Auto-delete user feedback after 30 seconds
-    await asyncio.sleep(30)
+        m = await client.get_chat_member(chat_id, user_id)
+        return m.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
+
+
+async def get_user_role(client, chat_id, user_id):
+    if user_id in INITIAL_ADMINS:
+        return "Bot Admin 💎"
     try:
-        await user_feedback.delete()
+        m = await client.get_chat_member(chat_id, user_id)
+        if m.status == ChatMemberStatus.OWNER:
+            return "Group Owner 👑"
+        if m.status == ChatMemberStatus.ADMINISTRATOR:
+            return "Group Admin 🛡"
     except:
         pass
+    return "User"
 
 
-# ================= NOTIFY ADMINS FUNCTION =================
-async def notify_admins_about_keyword_detection(client, message, admin_names, matched_keywords):
-    """Send detailed notification to all admins about keyword detection"""
-    
-    user = message.from_user
-    chat = message.chat
-    
-    # Get message content
-    msg_content = message.text or message.caption or "📎 Media message"
-    if len(msg_content) > 200:
-        msg_content = msg_content[:200] + "..."
-    
-    # Build admin notification
-    notification = f"""
-{beautiful_header('security')}
+def purge_fail_reason(deleted, failed):
+    if deleted == 0:
+        return "Bot does not have permission to delete messages."
+    if failed > 0:
+        return "Some messages are too old or restricted by Telegram."
+    return "Unknown error."
 
-🔔 **KEYWORD ALERT DETECTED**
 
-📋 **Alert Type:** Admin Keyword Detection
-💬 **Group:** {chat.title}
-👤 **User:** {user.mention}
-🆔 **User ID:** `{user.id}`
+async def notify_admins(client, chat_id):
+    text = "🚨 **Admin Notification** 🚨\n\n"
 
-💬 **Message Content:**
-{msg_content}
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            text += f"[{m.user.first_name}](tg://user?id={m.user.id})  "
 
-🔍 **Detected Keywords:**
-{', '.join(matched_keywords)}
+    return text
+# ================== MENTION (NO VISIBLE LINK) ==================
+def mention(user):
+    return f"[{user.first_name}](tg://user?id={user.id})"
 
-👥 **Available Admins ({len(admin_names)}):**
-{', '.join(admin_names[:5])}{'...' if len(admin_names) > 5 else ''}
+def premium_tag(user):
+    emojis = ["🦋","🔥","✨","💖","👑","⚡"]
+    return f"{emojis[user.id % len(emojis)]} {mention(user)}"
 
-🕒 **Time:** {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}
-📎 **Message Link:** [Click to view]({message.link})
+# ================== UI CARDS ==================
+START_INTRO = """
+╔═══════════════════╗
+ 🌸 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗧𝗔𝗚𝗚𝗘𝗥 🌸
+╚═══════════════════╝
+
+✨ **Welcome {user}**
+
+🚀 Fast • Safe • Premium  
+👑 Admin-only tagging system
+
+━━━━━━━━━━━━━━━━━━━
+📌 Commands:
+/tagall – Tag all members  
+/tagadmin – Tag admins  
+/stop – Stop tagging
 """
+
+WELCOME_USER_CARD = """
+╔═══════════════════╗
+   🎉 𝗡𝗘𝗪 𝗠𝗘𝗠𝗕𝗘𝗥 🎉
+╚═══════════════════╝
+
+👋 **Welcome:** {mention}
+
+━━━━━━━━━━━━━━━━━━━
+🆔 **User ID:** `{user_id}`
+👤 **Username:** {username}
+🤖 **Account:** {account}
+🕒 **Joined:** {time}
+
+━━━━━━━━━━━━━━━━━━━
+💎 **Group:** {group}
+
+📌 Please follow group rules  
+⚡ Enjoy your stay!
+"""
+
+START_CARD = """
+╔═══════════════════╗
+   💎 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗧𝗔𝗚𝗚𝗘𝗥
+╚═══════════════════╝
+
+🚀 **Tagging Started**
+━━━━━━━━━━━━━━━━━━━
+👑 **Admin:** {admin}
+🎯 **Target:** {target}
+
+🛑 Use Stop button to cancel
+"""
+
+DONE_CARD = """
+╔═══════════════════╗
+   ✅ 𝗧𝗔𝗦𝗞 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗
+╚═══════════════════╝
+
+👥 **Total Tagged:** {total}
+👑 **By:** {admin}
+
+💎 Premium Tagger
+"""
+
+STOP_CARD = """
+╔═══════════════════╗
+   🛑 𝗧𝗔𝗚𝗚𝗜𝗡𝗚 𝗦𝗧𝗢𝗣𝗣𝗘𝗗
+╚═══════════════════╝
+⚠️ Process cancelled by admin
+"""
+
+
+PURGE_DONE_CARD = """
+╔═══════════════════╗
+   🧹 𝗣𝗨𝗥𝗚𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+🗑 **Deleted:** `{count}`
+💬 **Chat:** {chat}
+🕒 **Time:** {time}
+
+💎 Premium Moderation
+"""
+
+
+PURGE_FAIL_CARD = """
+╔═══════════════════╗
+   ❌ 𝗣𝗨𝗥𝗚𝗘 𝗙𝗔𝗜𝗟𝗘𝗗
+╚═══════════════════╝
+
+👑 **Requested By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+⚠️ **Deleted:** `{deleted}`
+🚫 **Failed:** `{failed}`
+
+📌 **Reason:**
+{reason}
+
+💡 Tip: Check bot admin permissions
+"""
+
+PURGE_DONE_CARD = """
+╔═══════════════════╗
+   🧹 𝗕𝗨𝗟𝗞 𝗣𝗨𝗥𝗚𝗘 𝗗𝗢𝗡𝗘
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+🗑 **Deleted:** `{count}`
+💬 **Chat:** {chat}
+🕒 **Time:** {time}
+
+💎 Premium Moderation
+"""
+
+PURGE_FAIL_CARD = """
+╔═══════════════════╗
+   ❌ 𝗕𝗨𝗟𝗞 𝗣𝗨𝗥𝗚𝗘 𝗙𝗔𝗜𝗟𝗘𝗗
+╚═══════════════════╝
+
+👑 **By:** {mention}
+🆔 **User ID:** `{user_id}`
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+⚠️ **Deleted:** `{deleted}`
+🚫 **Failed:** `{failed}`
+
+📌 **Reason:**
+{reason}
+"""
+
+def buttons():
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("🛑 Stop", callback_data="stop_tag"),
+            InlineKeyboardButton("👑 Tag Admins", callback_data="tag_admin")
+        ]]
+    )
+
+# ================== SEND TAG MESSAGES ==================
+async def send_reply_tag(client, chat_id, reply_id, users):
+    text = (
+        "╭──────── ✨ ────────╮\n"
+        "   💌 𝗠𝗘𝗠𝗕𝗘𝗥 𝗧𝗔𝗚 💌\n"
+        "╰──────── ✨ ────────╯\n\n"
+    )
+
+    for u in users:
+        text += premium_tag(u) + "   "
+
+    text += "\n\n━━━━━━━━━━━━━━━━━━\n⚡ Please check message above"
+
+    await client.send_message(
+        chat_id,
+        text,
+        reply_to_message_id=reply_id,
+        disable_web_page_preview=True
+    )
+
+async def send_normal_tag(client, chat_id, users):
+    text = (
+        "╭──────── ✨ ────────╮\n"
+        "   💌 𝗔𝗧𝗧𝗘𝗡𝗧𝗜𝗢𝗡 💌\n"
+        "╰──────── ✨ ────────╯\n\n"
+    )
     
-    # Create action buttons
-    buttons = [
-        [
-            InlineKeyboardButton("💬 Reply to User", callback_data=f"reply:{user.id}"),
-            InlineKeyboardButton("👤 User Info", callback_data=f"userinfo:{user.id}")
-        ],
-        [
-            InlineKeyboardButton("✅ Mark Checked", callback_data=f"checked_alert:{chat.id}:{user.id}"),
-            InlineKeyboardButton("👀 View Message", url=message.link)
-        ],
-        [
-            InlineKeyboardButton("⚠️ Warn User", callback_data=f"warn_keyword:{user.id}:{chat.id}"),
-            InlineKeyboardButton("🔇 Mute User", callback_data=f"mute_keyword:{user.id}:{chat.id}")
-        ]
-    ]
+    for u in users:
+        text += premium_tag(u) + "   "
+
+    text += "\n\n━━━━━━━━━━━━━━━━━━\n⚡ Please check message above"
     
-    # Send to all admins
-    admin_count = 0
-    try:
-        async for member in client.get_chat_members(chat.id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER) and not member.user.is_bot:
-                try:
-                    await client.send_message(
-                        member.user.id,
-                        notification + beautiful_footer(),
-                        reply_markup=InlineKeyboardMarkup(buttons),
-                        disable_web_page_preview=True
-                    )
-                    admin_count += 1
-                except Exception as e:
-                    print(f"Error sending to admin {member.user.id}: {e}")
-                    continue
-    except Exception as e:
-        print(f"Error getting chat members: {e}")
-    
-    print(f"Keyword alert: Notified {admin_count} admins about user {user.id}")
+    await client.send_message(
+        chat_id,
+        text,
+        disable_web_page_preview=True
+    )
 
 
-# ================= CALLBACK HANDLERS FOR KEYWORD ALERTS =================
-@app.on_callback_query(filters.regex("^checked_alert:"))
-async def checked_alert_callback(client, cq):
-    """Mark alert as checked by admin"""
-    
-    try:
-        parts = cq.data.split(":")
-        chat_id = int(parts[1])
-        user_id = int(parts[2])
-        
-        # Get chat info
-        chat = await client.get_chat(chat_id)
-        user = await client.get_users(user_id)
-        
-        await cq.answer(
-            f"✅ Alert checked for {user.first_name} in {chat.title}",
-            show_alert=False
-        )
-        
-        # Update message to show checked status
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n✅ **Checked by:** {cq.from_user.mention}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Checked", callback_data="already_checked")]
-            ])
-        )
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
+# ================== TAG ALL ==================
+@app.on_message(filters.command("tagall") & filters.group)
+async def tag_all(client: Client, message: Message):
 
-
-@app.on_callback_query(filters.regex("^warn_keyword:"))
-async def warn_keyword_callback(client, cq):
-    """Warn user for keyword spam"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Check if callback user is admin in that chat
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("Permission denied", show_alert=True)
-            return
-        
-        # Get user info
-        user = await client.get_users(user_id)
-        
-        # Add warning
-        cur.execute(
-            "INSERT INTO user_warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (chat_id, user_id, "Keyword spam detection")
-        )
-        conn.commit()
-        
-        # Get warning count
-        cur.execute(
-            "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        )
-        warning_count = cur.fetchone()[0]
-        
-        await cq.answer(
-            f"⚠️ Warning {warning_count}/3 issued to {user.first_name}",
-            show_alert=False
-        )
-        
-        # Notify in group
-        try:
-            await client.send_message(
-                chat_id,
-                f"{beautiful_header('moderation')}\n\n"
-                f"⚠️ **WARNING FOR KEYWORD SPAM**\n\n"
-                f"👤 **User:** {user.mention}\n"
-                f"📊 **Warnings:** {warning_count}/3\n"
-                f"📝 **Reason:** Excessive admin mentions\n"
-                f"👨‍💼 **By:** {cq.from_user.mention}\n\n"
-                f"ℹ️ Please avoid unnecessary admin mentions."
-                f"{beautiful_footer()}"
-            )
-        except:
-            pass
-        
-        # Update callback message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n⚠️ **Warning issued by:** {cq.from_user.mention}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Warning Sent", callback_data="warning_sent")]
-            ])
-        )
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-@app.on_callback_query(filters.regex("^mute_keyword:"))
-async def mute_keyword_callback(client, cq):
-    """Mute user for keyword spam"""
-    
-    try:
-        parts = cq.data.split(":")
-        user_id = int(parts[1])
-        chat_id = int(parts[2])
-        
-        # Check if callback user is admin in that chat
-        if not await can_user_restrict(client, chat_id, cq.from_user.id):
-            await cq.answer("Permission denied", show_alert=True)
-            return
-        
-        # Get user info
-        user = await client.get_users(user_id)
-        
-        # Mute for 1 hour
-        await client.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=ChatPermissions(can_send_messages=False),
-            until_date=datetime.now(timezone.utc) + timedelta(hours=1)
-        )
-        
-        await cq.answer(
-            f"🔇 Muted {user.first_name} for 1 hour",
-            show_alert=False
-        )
-        
-        # Notify in group
-        try:
-            await client.send_message(
-                chat_id,
-                f"{beautiful_header('moderation')}\n\n"
-                f"🔇 **USER MUTED FOR KEYWORD SPAM**\n\n"
-                f"👤 **User:** {user.mention}\n"
-                f"⏰ **Duration:** 1 hour\n"
-                f"📝 **Reason:** Excessive admin mentions\n"
-                f"👨‍💼 **By:** {cq.from_user.mention}\n\n"
-                f"ℹ️ User cannot send messages for 1 hour."
-                f"{beautiful_footer()}"
-            )
-        except:
-            pass
-        
-        # Update callback message
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n🔇 **Muted by:** {cq.from_user.mention}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ User Muted", callback_data="muted")]
-            ])
-        )
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-
-# ================= KEYWORD STATISTICS COMMAND =================
-@app.on_message(filters.command("keywordstats") & filters.group)
-async def keyword_stats_command(client, message: Message):
-    """Show keyword detection statistics"""
-    
     chat_id = message.chat.id
-    
-    # Check admin status
-    try:
-        member = await client.get_chat_member(chat_id, message.from_user.id)
-        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            await message.reply_text(
-                f"{beautiful_header('admin')}\n\n"
-                "❌ **Admin Permission Required**"
-                f"{beautiful_footer()}"
-            )
+    user_id = message.from_user.id
+
+    if not await is_admin(client, chat_id, user_id):
+        return await message.reply("❌ **Only admin can use this command**")
+
+    if is_on_cooldown(user_id):
+        return await message.reply("⏳ **Cooldown active, try later**")
+
+    update_cooldown(user_id)
+    STOP_TAG.discard(chat_id)
+
+    start_msg = await message.reply(
+        START_CARD.format(
+            admin=message.from_user.mention,
+            target="All Members"
+        ),
+        reply_markup=buttons()
+    )
+
+    members = []
+    async for m in client.get_chat_members(chat_id):
+        if not m.user.is_bot:
+            members.append(m.user)
+
+    batch = []
+
+    for user in members:
+        if chat_id in STOP_TAG:
+            await start_msg.edit(STOP_CARD)
             return
-    except:
+
+        batch.append(user)
+
+        if len(batch) == TAG_LIMIT:
+            if message.reply_to_message:
+                await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+            else:
+                await send_normal_tag(client, chat_id, batch)
+
+            batch.clear()
+            await asyncio.sleep(DELAY)
+
+    if batch:
+        if message.reply_to_message:
+            await send_reply_tag(client, chat_id, message.reply_to_message.id, batch)
+        else:
+            await send_normal_tag(client, chat_id, batch)
+
+    await start_msg.edit(
+        DONE_CARD.format(
+            total=len(members),
+            admin=message.from_user.mention
+        )
+    )
+
+# ================== TAG ADMINS ==================
+@app.on_message(filters.command("tagadmin") & filters.group)
+async def tag_admins(client, message: Message):
+    text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
+    async for m in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+        text += premium_tag(m.user) + "\n"
+    await message.reply(text, disable_web_page_preview=True)
+
+# ================== STOP ==================
+@app.on_message(filters.command("stop") & filters.group)
+async def stop_cmd(client, message: Message):
+    STOP_TAG.add(message.chat.id)
+    await message.reply("🛑 **Tagging stopped**")
+
+@app.on_callback_query(filters.regex("stop_tag"))
+async def stop_cb(client, cb):
+    STOP_TAG.add(cb.message.chat.id)
+    await cb.message.edit(STOP_CARD)
+
+@app.on_callback_query(filters.regex("tag_admin"))
+async def tag_admin_cb(client, cb):
+    text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
+    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+        text += premium_tag(m.user) + "\n"
+    await cb.message.reply(text, disable_web_page_preview=True)
+
+
+@app.on_message(filters.command("purge") & filters.group)
+async def purge_cmd(client, message):
+
+    silent = "-s" in message.command
+
+    if not await can_purge(client, message.chat.id, message.from_user.id):
+        if not silent:
+            await message.reply("❌ **Admin only command**")
         return
-    
-    # Get stats from database
-    cur.execute(
-        """
-        SELECT user_id, COUNT(*) as count, MAX(last_ping) as last_time
-        FROM admin_ping_cooldown 
-        WHERE chat_id=?
-        GROUP BY user_id 
-        ORDER BY count DESC 
-        LIMIT 10
-        """,
-        (chat_id,)
-    )
-    top_users = cur.fetchall()
-    
-    cur.execute(
-        "SELECT COUNT(*) FROM admin_ping_cooldown WHERE chat_id=?",
-        (chat_id,)
-    )
-    total_detections = cur.fetchone()[0]
-    
-    cur.execute(
-        "SELECT COUNT(DISTINCT user_id) FROM admin_ping_cooldown WHERE chat_id=?",
-        (chat_id,)
-    )
-    unique_users = cur.fetchone()[0]
-    
-    # Build stats message
-    stats_text = f"""
-{beautiful_header('security')}
 
-📊 **KEYWORD DETECTION STATISTICS**
+    if not message.reply_to_message:
+        if not silent:
+            await message.reply("⚠️ **Reply to a message to purge**")
+        return
 
-📈 **Overview:**
-• Total Detections: {total_detections}
-• Unique Users: {unique_users}
-• Keywords Tracked: {len(ADMIN_KEYWORDS)}
-• Cooldown: {ADMIN_PING_COOLDOWN//60} minutes
+    start_id = message.reply_to_message.id
+    end_id = message.id
 
-🔍 **Top 10 Users (Most Alerts):**
-"""
-    
-    if top_users:
-        for i, (user_id, count, last_time) in enumerate(top_users, 1):
-            try:
-                user = await client.get_users(user_id)
-                last_seen = datetime.fromtimestamp(last_time).strftime('%Y-%m-%d %H:%M')
-                stats_text += f"{i}. {user.mention} - {count} alerts (Last: {last_seen})\n"
-            except:
-                stats_text += f"{i}. User `{user_id}` - {count} alerts\n"
-    else:
-        stats_text += "✅ No keyword alerts detected yet.\n"
-    
-    stats_text += f"""
-⚙️ **System Info:**
-• Active Detection: ✅ ENABLED
-• Cooldown System: ✅ ACTIVE
-• Admin Notifications: ✅ WORKING
-• User Feedback: ✅ PROVIDED
+    deleted = 0
+    failed = 0
 
-🎯 **Detected Keywords ({len(ADMIN_KEYWORDS)}):**
-{', '.join(ADMIN_KEYWORDS[:8])}...
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_keyword_stats"),
-            InlineKeyboardButton("⚙️ Settings", callback_data="keyword_settings")
-        ],
-        [
-            InlineKeyboardButton("📖 Keyword List", callback_data="show_keywords"),
-            InlineKeyboardButton("📊 Full Report", callback_data="full_keyword_report")
-        ]
-    ]
-    
-    await message.reply_text(
-        stats_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-# ================= CLEANUP OLD COOLDOWNS TASK =================
-async def cleanup_keyword_cooldowns():
-    """Cleanup old keyword cooldown entries (older than 1 week)"""
-    while True:
+    for msg_id in range(start_id, end_id + 1):
         try:
-            one_week_ago = int(time.time()) - (7 * 24 * 3600)  # 1 week ago
-            
-            cur.execute(
-                "DELETE FROM admin_ping_cooldown WHERE last_ping < ?",
-                (one_week_ago,)
-            )
-            deleted = cur.rowcount
-            conn.commit()
-            
-            if deleted > 0:
-                print(f"Cleaned {deleted} old keyword cooldown entries")
-            
-        except Exception as e:
-            print(f"Error cleaning keyword cooldowns: {e}")
-        
-        await asyncio.sleep(86400)  # Run every 24 hours
+            await client.delete_messages(message.chat.id, msg_id)
+            deleted += 1
+            await asyncio.sleep(0.08)
+        except:
+            failed += 1
 
-
-# ================= ADD TO STARTUP =================
-# Add this to your startup function
-async def start_background_tasks():
-    """Start all background tasks"""
-    # ... your existing tasks ...
-    asyncio.create_task(cleanup_keyword_cooldowns())
-    # ... your existing tasks ...
-
-
-# ================= KEYWORD SETTINGS MENU =================
-@app.on_callback_query(filters.regex("^keyword_settings$"))
-async def keyword_settings_callback(client, cq):
-    """Show keyword detection settings menu"""
-    
-    if not await can_user_restrict(client, cq.message.chat.id, cq.from_user.id):
-        await cq.answer("❌ Admin permission required", show_alert=True)
+    if silent:
         return
-    
-    settings_text = f"""
-{beautiful_header('settings')}
 
-⚙️ **KEYWORD DETECTION SETTINGS**
+    role = await get_user_role(client, message.chat.id, message.from_user.id)
 
-📋 **Current Configuration:**
-• Cooldown: {ADMIN_PING_COOLDOWN} seconds ({ADMIN_PING_COOLDOWN//60} minutes)
-• Keywords: {len(ADMIN_KEYWORDS)} active keywords
-• Detection: ✅ Active
-• Notifications: ✅ Enabled
+    # ❌ FAILURE / PARTIAL FAILURE
+    if failed > 0:
+        report = await message.reply(
+            PURGE_FAIL_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                deleted=deleted,
+                failed=failed,
+                reason=purge_fail_reason(deleted, failed)
+            ),
+            disable_web_page_preview=True
+        )
+    else:
+        # ✅ SUCCESS (already implemented)
+        report = await message.reply(
+            PURGE_DONE_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                count=deleted,
+                chat=message.chat.title,
+                time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+            ),
+            disable_web_page_preview=True
+        )
 
-🎯 **Available Actions:**
-"""
-    
-    buttons = [
-        [
-            InlineKeyboardButton("⏰ Change Cooldown", callback_data="change_cooldown"),
-            InlineKeyboardButton("📝 Add Keyword", callback_data="add_keyword")
-        ],
-        [
-            InlineKeyboardButton("🗑️ Remove Keyword", callback_data="remove_keyword"),
-            InlineKeyboardButton("📋 View All Keywords", callback_data="view_all_keywords")
-        ],
-        [
-            InlineKeyboardButton("🔧 Test Detection", callback_data="test_detection"),
-            InlineKeyboardButton("📊 Statistics", callback_data="keywordstats")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back", callback_data="moderation_menu"),
-            InlineKeyboardButton("✅ Save", callback_data="save_keyword_settings")
-        ]
-    ]
-    
-    await cq.message.edit_text(
-        settings_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    
-    await cq.answer()
+    # auto delete report
+    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
+    await report.delete()
 
-# ================= CALLBACK HANDLERS FOR AUTO-REPORT =================
+@app.on_message(filters.command("purgeall") & filters.group)
+async def bulk_purge(client, message):
 
+    silent = "-s" in message.command
+
+    if not await can_purge(client, message.chat.id, message.from_user.id):
+        if not silent:
+            await message.reply("❌ **Only Group Admin or Bot Admin can use this command**")
+        return
+
+    if len(message.command) < 2:
+        if not silent:
+            await message.reply("⚠️ Usage: `/purgeall 50`")
+        return
+
+    try:
+        limit = int(message.command[1])
+        if limit <= 0:
+            raise ValueError
+    except:
+        if not silent:
+            await message.reply("❌ Invalid number")
+        return
+
+    deleted = 0
+    failed = 0
+
+    async for msg in client.get_chat_history(
+        message.chat.id,
+        limit=limit + 1
+    ):
+        try:
+            await msg.delete()
+            deleted += 1
+            await asyncio.sleep(0.05)
+        except:
+            failed += 1
+
+    if silent:
+        return
+
+    role = await get_user_role(client, message.chat.id, message.from_user.id)
+
+    # ❌ FAILURE / PARTIAL
+    if failed > 0:
+        report = await message.reply(
+            PURGE_FAIL_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                deleted=deleted,
+                failed=failed,
+                reason=purge_fail_reason(deleted, failed)
+            ),
+            disable_web_page_preview=True
+        )
+    else:
+        # ✅ SUCCESS
+        report = await message.reply(
+            PURGE_DONE_CARD.format(
+                mention=mention(message.from_user),
+                user_id=message.from_user.id,
+                role=role,
+                count=deleted,
+                chat=message.chat.title,
+                time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+            ),
+            disable_web_page_preview=True
+        )
+
+    # 🧹 Auto-delete report
+    await asyncio.sleep(PURGE_REPORT_DELETE_AFTER)
+    await report.delete()
+
+ADMIN_KEYWORDS = ["admin", "@admin", "admins", "help", "support"]
+
+@app.on_message(filters.group & filters.text)
+async def admin_call_detector(client, message):
+
+    text = message.text.lower()
+
+    if any(word in text for word in ADMIN_KEYWORDS):
+        notify_text = await notify_admins(client, message.chat.id)
+
+        await message.reply(
+            notify_text,
+            disable_web_page_preview=True
+        )
+
+
+# ================== RUN ==================
+app.run()
 
 # ================= ADDITIONAL HELPER FUNCTIONS =================
 async def is_group_admin(client, chat_id, user_id):
@@ -7954,663 +6201,6 @@ async def build_tag_user_card(client, message):
     )
 
 
-
-
-# ================= ENHANCED TAGALL WITH COOLDOWN & LIMITS =================
-# ================= ENHANCED TAGALL WITH COOLDOWN & LIMITS =================
-from datetime import datetime, timedelta
-
-# Cooldown storage
-tagall_cooldowns = {}
-
-@app.on_message(filters.command("tagall") & filters.group)
-async def enhanced_tagall_command(client, message: Message):
-    """Enhanced tagall command with cooldown, limits, and progress"""
-    
-    # Check admin status
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Admin Permission Required**\n"
-                "Only group admins can use this command."
-                f"{beautiful_footer()}"
-            )
-            return
-    except:
-        await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n"
-            "❌ **Unable to verify admin status**"
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    # Check cooldown (10 minutes per admin for safety)
-    current_time = datetime.now(timezone.utc)
-    cooldown_key = f"{chat_id}:{user_id}"
-    
-    if cooldown_key in tagall_cooldowns:
-        last_used = tagall_cooldowns[cooldown_key]
-        cooldown_end = last_used + timedelta(minutes=10)  # 10 minutes cooldown
-        
-        if current_time < cooldown_end:
-            remaining = cooldown_end - current_time
-            minutes = int(remaining.total_seconds() // 60)
-            seconds = int(remaining.total_seconds() % 60)
-            
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "⏳ **Tagall Cooldown**\n\n"
-                f"Please wait **{minutes}m {seconds}s** before using tagall again.\n\n"
-                f"🛡️ **Cooldown:** 10 minutes (Due to 1-minute delays between batches)"
-                f"{beautiful_footer()}"
-            )
-            return
-    
-    # Check if bot is admin
-    try:
-        bot_member = await client.get_chat_member(chat_id, "me")
-        if not bot_member.privileges.can_mention_all:
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Bot Needs Mention Permission**\n"
-                "I need 'Mention All Users' permission to use tagall."
-                f"{beautiful_footer()}"
-            )
-            return
-    except:
-        pass
-    
-    # Get custom message (optional)
-    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention everyone!"
-    
-    # Start tagging process
-    status_msg = await message.reply_text(
-        f"{beautiful_header('tools')}\n\n"
-        "👥 **TAGGING ALL MEMBERS**\n\n"
-        "🔄 Fetching members list...\n"
-        "⏳ This may take a moment..."
-        f"{beautiful_footer()}"
-    )
-    
-    try:
-        # Get all members
-        mentions = []
-        member_count = 0
-        bot_count = 0
-        admin_count = 0
-        
-        async for member in client.get_chat_members(chat_id):
-            if member.user.is_bot:
-                bot_count += 1
-                continue
-            
-            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-                admin_count += 1
-                # Admins in bold
-                mentions.append(f"**{member.user.mention}** (Admin)")
-            else:
-                mentions.append(member.user.mention)
-            
-            member_count += 1
-            
-            # Update status every 50 members
-            if member_count % 50 == 0:
-                try:
-                    await status_msg.edit_text(
-                        f"{beautiful_header('tools')}\n\n"
-                        "👥 **TAGGING ALL MEMBERS**\n\n"
-                        f"📊 **Progress:** {progress_bar(int((member_count/max(1, chat.members_count))*100))}\n"
-                        f"👤 **Members fetched:** {member_count}\n"
-                        f"🤖 **Bots skipped:** {bot_count}\n"
-                        f"⚡ **Admins:** {admin_count}\n\n"
-                        f"🔄 Fetching..."
-                        f"{beautiful_footer()}"
-                    )
-                except:
-                    pass
-        
-        # Get chat info for total count
-        try:
-            chat = await client.get_chat(chat_id)
-            total_members = chat.members_count
-        except:
-            total_members = "Unknown"
-        
-        # Calculate estimated time
-        total_batches = len(mentions) // 5 + (1 if len(mentions) % 5 > 0 else 0)
-        estimated_minutes = total_batches  # 1 minute per batch
-        estimated_seconds = estimated_minutes * 60
-        
-        # Update final status with time estimate
-        await status_msg.edit_text(
-            f"{beautiful_header('tools')}\n\n"
-            "👥 **TAGGING IN PROGRESS**\n\n"
-            f"📊 **Members to tag:** {member_count}\n"
-            f"📦 **Total batches:** {total_batches}\n"
-            f"⏰ **Estimated time:** {estimated_minutes} minutes\n"
-            f"📝 **Message:** {custom_message[:50]}...\n\n"
-            "🔄 Starting mentions (1 minute delay between batches)..."
-            f"{beautiful_footer()}"
-        )
-        
-        # Send the custom message first
-        if custom_message and custom_message != "Attention everyone!":
-            header_msg = await message.reply_text(
-                f"📢 **{custom_message}**\n\n"
-                f"👥 Tagging {member_count} members...\n"
-                f"⏰ Estimated: {estimated_minutes} minutes\n"
-                f"⚡ Requested by: {message.from_user.mention}"
-            )
-        else:
-            header_msg = await message.reply_text(
-                f"👋 **Attention all members!**\n\n"
-                f"👥 Tagging {member_count} members...\n"
-                f"⏰ Estimated: {estimated_minutes} minutes\n"
-                f"⚡ Requested by: {message.from_user.mention}"
-            )
-        
-        # Tag members in batches (Telegram limit: ~5 mentions per message is safe)
-        tagged_count = 0
-        batch_size = 5
-        batch_number = 1
-        
-        for i in range(0, len(mentions), batch_size):
-            batch = mentions[i:i + batch_size]
-            if batch:
-                try:
-                    # Send batch with batch number
-                    await message.reply_text(
-                        f"**Batch {batch_number}/{total_batches}**\n" +
-                        " ".join(batch)
-                    )
-                    tagged_count += len(batch)
-                    
-                    # Update status
-                    try:
-                        await status_msg.edit_text(
-                            f"{beautiful_header('tools')}\n\n"
-                            "👥 **TAGGING IN PROGRESS**\n\n"
-                            f"📊 **Progress:** {progress_bar(int((tagged_count/member_count)*100))}\n"
-                            f"👤 **Tagged:** {tagged_count}/{member_count}\n"
-                            f"📦 **Batch:** {batch_number}/{total_batches}\n"
-                            f"⏰ **Remaining:** {total_batches - batch_number} minutes\n\n"
-                            f"⏳ Next batch in 1 minute..."
-                            f"{beautiful_footer()}"
-                        )
-                    except:
-                        pass
-                    
-                    batch_number += 1
-                    
-                    # 1 MINUTE DELAY between batches
-                    if i + batch_size < len(mentions):  # Not the last batch
-                        await asyncio.sleep(60)  # 1 minute delay
-                    
-                except FloodWait as e:
-                    # If we get flood wait, sleep and continue
-                    await asyncio.sleep(e.value)
-                except Exception as e:
-                    print(f"Error tagging batch {i}: {e}")
-                    continue
-        
-        # Final completion message
-        completion_msg = await message.reply_text(
-            f"{beautiful_header('tools')}\n\n"
-            "✅ **TAGALL COMPLETE**\n\n"
-            f"📊 **Statistics:**\n"
-            f"• Total members: {total_members}\n"
-            f"• Members tagged: {tagged_count}\n"
-            f"• Bots skipped: {bot_count}\n"
-            f"• Admins: {admin_count}\n"
-            f"• Batches sent: {total_batches}\n"
-            f"• Total time: {estimated_minutes} minutes\n"
-            f"• Custom message: {custom_message[:30]}...\n\n"
-            f"👨‍💼 **By:** {message.from_user.mention}\n"
-            f"⏰ **Next available:** In 10 minutes"
-            f"{beautiful_footer()}"
-        )
-        
-        # Set cooldown (10 minutes due to delays)
-        tagall_cooldowns[cooldown_key] = current_time
-        
-        # Auto-delete completion after 30 seconds
-        await asyncio.sleep(30)
-        try:
-            await completion_msg.delete()
-            await header_msg.delete()
-            await status_msg.delete()
-            await message.delete()
-        except:
-            pass
-        
-    except Exception as e:
-        await status_msg.edit_text(
-            f"{beautiful_header('tools')}\n\n"
-            "❌ **TAGALL FAILED**\n\n"
-            f"Error: {str(e)[:100]}\n\n"
-            f"⚠️ Please try again later."
-            f"{beautiful_footer()}"
-        )
-
-
-# ================= QUICK TAGALL FOR ADMINS ONLY (WITHOUT DELAYS) =================
-@app.on_message(filters.command("admintag") & filters.group)
-async def admin_tag_command(client, message: Message):
-    """Tag all admins only (no delays needed since few admins)"""
-    
-    # Check admin status
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Admin Permission Required**"
-                f"{beautiful_footer()}"
-            )
-            return
-    except:
-        return
-    
-    # Check cooldown (2 minutes for admintag)
-    current_time = datetime.now(timezone.utc)
-    cooldown_key = f"admintag:{chat_id}:{user_id}"
-    
-    if cooldown_key in tagall_cooldowns:
-        last_used = tagall_cooldowns[cooldown_key]
-        cooldown_end = last_used + timedelta(minutes=2)
-        
-        if current_time < cooldown_end:
-            remaining = cooldown_end - current_time
-            minutes = int(remaining.total_seconds() // 60)
-            seconds = int(remaining.total_seconds() % 60)
-            
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "⏳ **Admintag Cooldown**\n\n"
-                f"Please wait **{minutes}m {seconds}s** before using admintag again."
-                f"{beautiful_footer()}"
-            )
-            return
-    
-    # Get admins list
-    admin_mentions = []
-    owner = None
-    
-    try:
-        async for member in client.get_chat_members(chat_id, filter=ChatMemberStatus.ADMINISTRATOR):
-            if not member.user.is_bot:
-                if member.status == ChatMemberStatus.OWNER:
-                    owner = f"👑 **Owner:** {member.user.mention}"
-                else:
-                    title = getattr(member, 'custom_title', 'Admin')
-                    admin_mentions.append(f"⚡ **{title}:** {member.user.mention}")
-    except:
-        pass
-    
-    if not admin_mentions and not owner:
-        await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n"
-            "📭 **No admins found to tag**"
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    # Get custom message
-    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention admins!"
-    
-    # Build admin tag message
-    admin_text = f"📢 **{custom_message}**\n\n"
-    
-    if owner:
-        admin_text += f"{owner}\n"
-    
-    if admin_mentions:
-        admin_text += "\n".join(admin_mentions)
-    
-    admin_text += f"\n\n👨‍💼 Tagged by: {message.from_user.mention}"
-    
-    # Send admin tag
-    await message.reply_text(admin_text)
-    
-    # Set cooldown
-    tagall_cooldowns[cooldown_key] = current_time
-
-
-# ================= SMART TAGALL WITH AUTO-DELAY ADJUSTMENT =================
-@app.on_message(filters.command("smarttag") & filters.group)
-async def smart_tagall_command(client, message: Message):
-    """Smart tagall that adjusts delays based on group size"""
-    
-    # Check admin status
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "❌ **Admin Permission Required**\n"
-                "Only group admins can use this command."
-                f"{beautiful_footer()}"
-            )
-            return
-    except:
-        await message.reply_text(
-            f"{beautiful_header('moderation')}\n\n"
-            "❌ **Unable to verify admin status**"
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    # Check cooldown (15 minutes for smarttag - longer due to larger groups)
-    current_time = datetime.now(timezone.utc)
-    cooldown_key = f"smarttag:{chat_id}:{user_id}"
-    
-    if cooldown_key in tagall_cooldowns:
-        last_used = tagall_cooldowns[cooldown_key]
-        cooldown_end = last_used + timedelta(minutes=15)
-        
-        if current_time < cooldown_end:
-            remaining = cooldown_end - current_time
-            minutes = int(remaining.total_seconds() // 60)
-            seconds = int(remaining.total_seconds() % 60)
-            
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                "⏳ **Smarttag Cooldown**\n\n"
-                f"Please wait **{minutes}m {seconds}s** before using smarttag again.\n\n"
-                f"🛡️ **Cooldown:** 15 minutes (For large groups)"
-                f"{beautiful_footer()}"
-            )
-            return
-    
-    # Get group size to determine settings
-    try:
-        chat = await client.get_chat(chat_id)
-        total_members = chat.members_count
-    except:
-        total_members = 100  # Default
-    
-    # Determine settings based on group size
-    if total_members < 50:
-        batch_size = 10
-        delay_seconds = 30  # 30 seconds for small groups
-        cooldown_minutes = 5
-    elif total_members < 200:
-        batch_size = 7
-        delay_seconds = 45  # 45 seconds for medium groups
-        cooldown_minutes = 8
-    else:
-        batch_size = 5
-        delay_seconds = 60  # 1 minute for large groups
-        cooldown_minutes = 15
-    
-    # Get custom message
-    custom_message = " ".join(message.command[1:]) if len(message.command) > 1 else "Attention everyone!"
-    
-    # Start process
-    status_msg = await message.reply_text(
-        f"{beautiful_header('tools')}\n\n"
-        "🤖 **SMART TAGALL INITIATED**\n\n"
-        f"📊 **Group size:** {total_members} members\n"
-        f"⚙️ **Auto-config:** {batch_size}/batch, {delay_seconds}s delay\n"
-        f"🔄 Fetching members..."
-        f"{beautiful_footer()}"
-    )
-    
-    try:
-        # Get all members
-        mentions = []
-        member_count = 0
-        bot_count = 0
-        admin_count = 0
-        
-        async for member in client.get_chat_members(chat_id):
-            if member.user.is_bot:
-                bot_count += 1
-                continue
-            
-            if member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-                admin_count += 1
-                mentions.append(f"**{member.user.mention}** (Admin)")
-            else:
-                mentions.append(member.user.mention)
-            
-            member_count += 1
-        
-        # Calculate
-        total_batches = len(mentions) // batch_size + (1 if len(mentions) % batch_size > 0 else 0)
-        estimated_seconds = total_batches * delay_seconds
-        estimated_minutes = estimated_seconds // 60
-        
-        # Send header
-        header_msg = await message.reply_text(
-            f"📢 **{custom_message}**\n\n"
-            f"🤖 **Smart Tagall Activated**\n"
-            f"👥 Members: {member_count}\n"
-            f"📦 Batches: {total_batches}\n"
-            f"⚙️ Config: {batch_size}/batch, {delay_seconds}s delay\n"
-            f"⏰ Est. time: {estimated_minutes}m {estimated_seconds%60}s\n"
-            f"👨‍💼 By: {message.from_user.mention}"
-        )
-        
-        # Tag in batches with dynamic delay
-        tagged_count = 0
-        batch_number = 1
-        
-        for i in range(0, len(mentions), batch_size):
-            batch = mentions[i:i + batch_size]
-            if batch:
-                try:
-                    # Send batch
-                    await message.reply_text(
-                        f"**Batch {batch_number}/{total_batches}** ({batch_size}/batch)\n" +
-                        " ".join(batch)
-                    )
-                    tagged_count += len(batch)
-                    
-                    # Update status
-                    progress = int((tagged_count / member_count) * 100)
-                    await status_msg.edit_text(
-                        f"{beautiful_header('tools')}\n\n"
-                        "🤖 **SMART TAGALL IN PROGRESS**\n\n"
-                        f"{progress_bar(progress)}\n"
-                        f"📊 **Progress:** {progress}%\n"
-                        f"👤 **Tagged:** {tagged_count}/{member_count}\n"
-                        f"📦 **Batch:** {batch_number}/{total_batches}\n"
-                        f"⏰ **Next in:** {delay_seconds} seconds\n\n"
-                        f"⚙️ **Config:** {batch_size}/batch, {delay_seconds}s delay"
-                        f"{beautiful_footer()}"
-                    )
-                    
-                    batch_number += 1
-                    
-                    # Dynamic delay between batches (except last)
-                    if i + batch_size < len(mentions):
-                        await asyncio.sleep(delay_seconds)
-                    
-                except Exception as e:
-                    print(f"Error in batch {batch_number}: {e}")
-                    continue
-        
-        # Completion
-        completion_msg = await message.reply_text(
-            f"{beautiful_header('tools')}\n\n"
-            "✅ **SMART TAGALL COMPLETE**\n\n"
-            f"📊 **Smart Statistics:**\n"
-            f"• Group size: {total_members}\n"
-            f"• Tagged: {tagged_count} members\n"
-            f"• Batches: {total_batches}\n"
-            f"• Batch size: {batch_size}\n"
-            f"• Delay: {delay_seconds}s\n"
-            f"• Total time: {estimated_minutes}m {estimated_seconds%60}s\n"
-            f"• Smart config: Auto-adjusted\n\n"
-            f"🤖 **System:** Smart optimization active\n"
-            f"👨‍💼 **By:** {message.from_user.mention}\n"
-            f"⏰ **Cooldown:** {cooldown_minutes} minutes"
-            f"{beautiful_footer()}"
-        )
-        
-        # Set cooldown
-        tagall_cooldowns[cooldown_key] = current_time
-        
-        # Cleanup
-        await asyncio.sleep(30)
-        try:
-            await completion_msg.delete()
-            await header_msg.delete()
-            await status_msg.delete()
-            await message.delete()
-        except:
-            pass
-        
-    except Exception as e:
-        await status_msg.edit_text(
-            f"{beautiful_header('tools')}\n\n"
-            "❌ **SMART TAGALL FAILED**\n\n"
-            f"Error: {str(e)[:100]}\n\n"
-            f"⚠️ Please try regular /tagall instead."
-            f"{beautiful_footer()}"
-        )
-
-
-# ================= TAGALL HELP COMMAND =================
-@app.on_message(filters.command("tagallhelp") & filters.group)
-async def tagall_help_command(client, message: Message):
-    """Show tagall help with all options"""
-    
-    help_text = f"""
-{beautiful_header('tools')}
-
-👥 **TAGALL COMMAND GUIDE**
-
-🎯 **Purpose:** Mention all group members safely.
-
-✅ **Available Commands:**
-• `/tagall [message]` - Standard tagall (1min delay)
-• `/smarttag [message]` - Auto-adjusts for group size
-• `/admintag [message]` - Tag only admins (no delay)
-• `/tagallhelp` - This help menu
-
-📋 **Standard Tagall (/tagall):**
-• Batch size: 5 mentions
-• Delay: 1 minute between batches
-• Cooldown: 10 minutes per admin
-• Best for: Medium to large groups
-
-🤖 **Smart Tagall (/smarttag):**
-• Auto-adjusts batch size & delay
-• Small groups: 10/batch, 30s delay
-• Medium groups: 7/batch, 45s delay  
-• Large groups: 5/batch, 60s delay
-• Cooldown: 15 minutes
-• Best for: All group sizes
-
-⚡ **Admin Tag (/admintag):**
-• Tags only admins
-• No delays needed
-• Cooldown: 2 minutes
-• Best for: Admin coordination
-
-🔒 **Safety Features:**
-• Admin-only access
-• Intelligent cooldowns
-• Progress tracking
-• Bot skipping
-• Flood protection
-• Auto-cleanup
-
-⚠️ **Important Notes:**
-• Don't abuse these commands
-• Respect cooldowns
-• Use appropriate command
-• Consider group size
-• Tag only when necessary
-
-🎯 **Best Practices:**
-1. Use `/admintag` for admin messages
-2. Use `/smarttag` for automatic optimization
-3. Use `/tagall` for consistent 1-minute delays
-4. Add clear message after command
-
-💡 **Pro Tips:**
-• `/tagall Meeting in 5 minutes!`
-• `/smarttag Important announcement!`
-• `/admintag Need admin assistance`
-• Keep messages short and clear
-    """
-    
-    buttons = [
-        [
-            InlineKeyboardButton("📊 Try /smarttag", callback_data="try_smarttag"),
-            InlineKeyboardButton("⚡ Try /admintag", callback_data="try_admintag")
-        ],
-        [
-            InlineKeyboardButton("🔧 Admin Panel", callback_data="admin_panel"),
-            InlineKeyboardButton("📚 Command List", callback_data="help_main")
-        ]
-    ]
-    
-    await message.reply_text(
-        help_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons),
-        disable_web_page_preview=True
-    )
-
-
-# ================= CLEANUP OLD COOLDOWNS TASK =================
-async def cleanup_tagall_cooldowns():
-    """Cleanup old cooldown entries"""
-    while True:
-        try:
-            current_time = datetime.now(timezone.utc)
-            keys_to_delete = []
-            
-            for key, last_used in tagall_cooldowns.items():
-                # Different cooldowns for different commands
-                if key.startswith("smarttag:"):
-                    max_age = timedelta(hours=2)
-                elif key.startswith("admintag:"):
-                    max_age = timedelta(hours=1)
-                else:
-                    max_age = timedelta(hours=3)  # Regular tagall
-                
-                if current_time > last_used + max_age:
-                    keys_to_delete.append(key)
-            
-            for key in keys_to_delete:
-                del tagall_cooldowns[key]
-            
-            if keys_to_delete:
-                print(f"Cleaned {len(keys_to_delete)} old tagall cooldowns")
-            
-        except Exception as e:
-            print(f"Error cleaning tagall cooldowns: {e}")
-        
-        await asyncio.sleep(1800)  # Run every 30 minutes
-
-
-# ================= CALLBACK HANDLERS =================
-@app.on_callback_query(filters.regex("^try_smarttag$"))
-async def try_smarttag_callback(client, cq):
-    """Try smarttag from callback"""
-    await cq.answer("Use /smarttag [message] in group chat", show_alert=True)
-
-@app.on_callback_query(filters.regex("^try_admintag$"))
-async def try_admintag_callback(client, cq):
-    """Try admintag from callback"""
-    await cq.answer("Use /admintag [message] in group chat", show_alert=True)
-    
-
 # ================= COMPLETE ID COMMAND =================
 async def get_profile_photos_count(client, user_id: int) -> str:
     """Get count of user's profile photos"""
@@ -8691,561 +6281,6 @@ async def get_chat_member_count(client, chat_id: int) -> str:
 
 
             
-# ================= MASTER ID COMMAND (COMPLETE INFORMATION) =================
-@app.on_message(filters.command(["id", "info", "whois"]) & (filters.group | filters.private))
-async def master_id_command(client, message: Message):
-    """
-    Master ID command with complete information
-    Supports: Reply, User ID, Username, Forward, Bulk extract
-    """
-    
-    try:
-        chat = message.chat
-        user = message.from_user
-        target_user = None
-        is_forwarded = False
-        extraction_method = "Self"
-        
-        # ================= USER EXTRACTION (MULTIPLE METHODS) =================
-        
-        # METHOD 1: Reply to message
-        if message.reply_to_message:
-            target_user = message.reply_to_message.from_user
-            
-            # Check if it's a forwarded message
-            if message.reply_to_message.forward_from:
-                target_user = message.reply_to_message.forward_from
-                is_forwarded = True
-                extraction_method = "Forwarded Message"
-            else:
-                extraction_method = "Reply to Message"
-        
-        # METHOD 2: User ID or Username from command
-        elif len(message.command) > 1:
-            user_arg = message.command[1]
-            
-            try:
-                # Check for bulk extraction
-                if "," in user_arg or " " in user_arg:
-                    await bulk_id_extraction(client, message)
-                    return
-                
-                # Single user extraction
-                if user_arg.isdigit():
-                    # User ID method
-                    target_user = await client.get_users(int(user_arg))
-                    extraction_method = f"User ID: {user_arg}"
-                elif user_arg.startswith("@"):
-                    # Username method
-                    target_user = await client.get_users(user_arg[1:])
-                    extraction_method = f"Username: {user_arg}"
-                else:
-                    # Invalid format
-                    await message.reply_text(
-                        f"{beautiful_header('info')}\n\n"
-                        "❌ **Invalid Format**\n\n"
-                        "**Valid formats:**\n"
-                        "• `/id` (your info)\n"
-                        "• `/id @username`\n"
-                        "• `/id 1234567890`\n"
-                        "• `/id` (reply to message)\n"
-                        "• `/id @user1 @user2` (bulk)\n"
-                        + beautiful_footer()
-                    )
-                    return
-                    
-            except PeerIdInvalid:
-                await message.reply_text(
-                    f"{beautiful_header('info')}\n\n"
-                    f"❌ **User Not Found**\n`{user_arg}`"
-                    + beautiful_footer()
-                )
-                return
-            except Exception as e:
-                await message.reply_text(
-                    f"{beautiful_header('info')}\n\n"
-                    f"❌ **Error Finding User**\n`{str(e)[:100]}`"
-                    + beautiful_footer()
-                )
-                return
-        
-        # No target specified - show own info
-        if not target_user:
-            target_user = user
-            extraction_method = "Self Information"
-        
-        # ================= GATHER COMPLETE INFORMATION =================
-        
-        # Basic user info
-        user_name = f"{target_user.first_name or ''} {target_user.last_name or ''}".strip()
-        username = f"@{target_user.username}" if target_user.username else "❌ No username"
-        is_premium = "✅ Premium User" if getattr(target_user, 'is_premium', False) else "❌ Not Premium"
-        is_bot = "🤖 Bot Account" if target_user.is_bot else "👤 Human Account"
-        dc_id = target_user.dc_id if target_user.dc_id else "Unknown"
-        language = target_user.language_code if target_user.language_code else "Unknown"
-        
-        # Account age estimation
-        account_age = await estimate_account_age(target_user.id)
-        
-        # Profile photos count
-        photos_count = await get_profile_photos_count(client, target_user.id)
-        
-        # User status
-        user_status = await get_user_status(client, target_user.id)
-        
-        # User bio
-        user_bio = await get_user_bio(client, target_user.id)
-        
-        # ================= GROUP-SPECIFIC INFORMATION =================
-        group_info = ""
-        warnings_info = ""
-        reports_info = ""
-        
-        if message.chat.type != "private":
-            # Get group member info
-            try:
-                member = await client.get_chat_member(chat.id, target_user.id)
-                
-                # Role determination
-                role_icons = {
-                    ChatMemberStatus.OWNER: "👑 Owner",
-                    ChatMemberStatus.ADMINISTRATOR: "⚡ Admin",
-                    ChatMemberStatus.MEMBER: "👤 Member",
-                    ChatMemberStatus.RESTRICTED: "🔇 Restricted",
-                    ChatMemberStatus.BANNED: "🚫 Banned",
-                    ChatMemberStatus.LEFT: "🚪 Left"
-                }
-                
-                role = role_icons.get(member.status, str(member.status))
-                
-                # Join date
-                join_date = member.joined_date.strftime('%Y-%m-%d %H:%M') if hasattr(member, 'joined_date') and member.joined_date else "Unknown"
-                
-                # Restrictions
-                until_date = member.until_date.strftime('%Y-%m-%d %H:%M') if hasattr(member, 'until_date') and member.until_date else "None"
-                
-                # Custom title
-                custom_title = f"\n🏷️ **Custom Title:** {member.custom_title}" if hasattr(member, 'custom_title') and member.custom_title else ""
-                
-                group_info = f"""
-👥 **GROUP STATUS:**
-• **Role:** {role}
-• **Joined:** {join_date}
-• **Restricted Until:** {until_date}
-{custom_title}
-                """
-                
-                # Admin permissions if applicable
-                if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-                    if hasattr(member, 'privileges'):
-                        group_info += "\n🔧 **ADMIN PERMISSIONS:**\n"
-                        priv = member.privileges
-                        permissions = [
-                            ("Change Info", priv.can_change_info),
-                            ("Delete Messages", priv.can_delete_messages),
-                            ("Restrict Members", priv.can_restrict_members),
-                            ("Invite Users", priv.can_invite_users),
-                            ("Pin Messages", priv.can_pin_messages),
-                            ("Promote Members", priv.can_promote_members),
-                            ("Manage Video", priv.can_manage_video_chats),
-                            ("Anonymous", priv.is_anonymous),
-                            ("Post Messages", getattr(priv, 'can_post_messages', False)),
-                            ("Edit Messages", getattr(priv, 'can_edit_messages', False))
-                        ]
-                        
-                        for perm_name, has_perm in permissions:
-                            group_info += f"• {perm_name}: {'✅' if has_perm else '❌'}\n"
-                
-                # Warnings count
-                cur.execute(
-                    "SELECT COUNT(*) FROM user_warnings WHERE chat_id=? AND user_id=?",
-                    (chat.id, target_user.id)
-                )
-                warning_count = cur.fetchone()[0]
-                
-                warnings_info = f"""
-⚠️ **WARNINGS:** {warning_count}/3 {progress_bar((warning_count/3)*100, 5)}
-                """
-                
-                # Reports count
-                cur.execute(
-                    "SELECT COUNT(*) FROM user_reports WHERE reported_user_id=? AND chat_id=?",
-                    (target_user.id, chat.id)
-                )
-                report_count = cur.fetchone()[0]
-                
-                reports_info = f"""
-📋 **REPORTS:** {report_count}
-                """
-                
-                # Message count (approximate)
-                cur.execute(
-                    "SELECT COUNT(*) FROM user_warnings WHERE user_id=? AND chat_id=?",
-                    (target_user.id, chat.id)
-                )
-                activity_count = cur.fetchone()[0]
-                
-                reports_info += f"""
-📊 **ACTIVITY:** {activity_count} actions
-                """
-                
-            except:
-                # User not in group or error
-                group_info = "👥 **Not in this group**"
-        
-        # ================= CHAT INFORMATION =================
-        chat_info = ""
-        if message.chat.type != "private":
-            try:
-                chat_member_count = await get_chat_member_count(client, chat.id)
-                chat_info = f"""
-💬 **CHAT INFO:**
-• **Name:** {chat.title}
-• **ID:** `{chat.id}`
-• **Type:** {chat.type.title()}
-• **Members:** {chat_member_count}
-                """
-            except:
-                chat_info = f"""
-💬 **Chat:** {chat.title}
-🆔 **Chat ID:** `{chat.id}`
-                """
-        else:
-            chat_info = "💬 **PRIVATE CHAT**"
-        
-        # ================= BUILD COMPLETE MESSAGE =================
-        
-        info_id = int(datetime.now().timestamp()) % 10000
-        
-        info_text = f"""
-{beautiful_header('info')}
-
-🆔 **USER INFORMATION** #{info_id}
-
-{beautiful_header('basic')}
-👤 **BASIC INFO:**
-• **Name:** {user_name}
-• **ID:** `{target_user.id}`
-• **Username:** {username}
-• **Premium:** {is_premium}
-• **Type:** {is_bot}
-• **DC ID:** {dc_id}
-• **Language:** {language}
-
-{beautiful_header('status')}
-📊 **ACCOUNT STATUS:**
-• **Status:** {user_status}
-• **Account Age:** {account_age}
-• **Profile Photos:** {photos_count}
-• **Bio:** {user_bio[:150] if user_bio else 'No bio available'}
-
-{beautiful_header('moderation')}
-🛡️ **MODERATION:**
-{warnings_info if warnings_info else ''}
-{reports_info if reports_info else ''}
-
-{group_info if group_info else ''}
-
-{chat_info if chat_info else ''}
-
-{beautiful_header('meta')}
-📋 **EXTRACTION METHOD:** {extraction_method}
-{'📩 **Forwarded Message**' if is_forwarded else ''}
-🕒 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        
-        # ================= CREATE ACTION BUTTONS =================
-        buttons = []
-        
-        # Quick action buttons
-        quick_actions = []
-        
-        if message.chat.type != "private" and target_user.id != user.id:
-            # Check if current user can take actions
-            can_moderate = await can_user_restrict(client, chat.id, user.id) or is_admin(user.id)
-            
-            if can_moderate:
-                quick_actions.append([
-                    InlineKeyboardButton("🔇 Mute", callback_data=f"mute:{target_user.id}:{chat.id}"),
-                    InlineKeyboardButton("🚫 Ban", callback_data=f"ban:{target_user.id}:{chat.id}"),
-                    InlineKeyboardButton("⚠️ Warn", callback_data=f"warn:{target_user.id}:{chat.id}")
-                ])
-                
-                # Check if can promote
-                try:
-                    promoter = await client.get_chat_member(chat.id, user.id)
-                    can_promote = (promoter.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]) and \
-                                 (hasattr(promoter, 'privileges') and promoter.privileges.can_promote_members)
-                    if can_promote or is_admin(user.id):
-                        quick_actions.append([
-                            InlineKeyboardButton("⚡ Promote", callback_data=f"promote:{target_user.id}:{chat.id}"),
-                            InlineKeyboardButton("📉 Demote", callback_data=f"demote:{target_user.id}:{chat.id}")
-                        ])
-                except:
-                    pass
-        
-        # Information buttons
-        info_buttons = [
-            [
-                InlineKeyboardButton("📋 Copy ID", callback_data=f"copyid:{target_user.id}"),
-                InlineKeyboardButton("📊 Stats", callback_data=f"stats:{target_user.id}:{chat.id}"),
-                InlineKeyboardButton("📜 History", callback_data=f"history:{target_user.id}:{chat.id}")
-            ],
-            [
-                InlineKeyboardButton("👤 Detailed", callback_data=f"detailed:{target_user.id}"),
-                InlineKeyboardButton("📸 Photos", callback_data=f"photos:{target_user.id}")
-            ]
-        ]
-        
-        # Navigation buttons
-        nav_buttons = [
-            [
-                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_id"),
-                InlineKeyboardButton("📤 Share", callback_data=f"share:{target_user.id}"),
-                InlineKeyboardButton("❌ Close", callback_data="close_id")
-            ]
-        ]
-        
-        # Combine all buttons
-        buttons = quick_actions + info_buttons + nav_buttons
-        
-        await message.reply_text(
-            info_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
-            disable_web_page_preview=True
-        )
-        
-    except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('info')}\n\n"
-            f"❌ **Error Getting Information**\n\n"
-            f"**Error:** `{str(e)[:200]}`\n\n"
-            f"**Your Info:**\n"
-            f"• User ID: `{message.from_user.id}`\n"
-            f"• Chat ID: `{message.chat.id}`"
-            f"{beautiful_footer()}"
-        )
-
-
-# ================= QUICK ID COMMAND (SIMPLE VERSION) =================
-@app.on_message(filters.command(["myid", "chatid", "fwdid"]))
-async def quick_id_commands(client, message: Message):
-    """
-    Quick ID commands for fast access
-    Commands: /myid, /chatid, /fwdid
-    """
-    
-    command = message.command[0].lower()
-    
-    if command == "myid":
-        # Show only user's own ID
-        response = f"""
-{beautiful_header('info')}
-
-👤 **YOUR INFORMATION**
-
-🆔 **User ID:** `{message.from_user.id}`
-📛 **Username:** @{message.from_user.username or 'None'}
-📱 **Name:** {message.from_user.first_name or ''} {message.from_user.last_name or ''}
-🤖 **Bot:** {'Yes' if message.from_user.is_bot else 'No'}
-💎 **Premium:** {'✅ Yes' if getattr(message.from_user, 'is_premium', False) else '❌ No'}
-
-💬 **Current Chat:**
-• ID: `{message.chat.id}`
-• Type: {message.chat.type.title()}
-{'• Name: ' + message.chat.title if hasattr(message.chat, 'title') else ''}
-        """
-        
-        buttons = [
-            [
-                InlineKeyboardButton("📋 Copy ID", callback_data=f"copyid:{message.from_user.id}"),
-                InlineKeyboardButton("📊 Full Info", callback_data="full_info")
-            ],
-            [
-                InlineKeyboardButton("👥 Chat Info", callback_data="chat_info"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_myid")
-            ]
-        ]
-    
-    elif command == "chatid":
-        # Show only chat ID
-        response = f"""
-{beautiful_header('info')}
-
-💬 **CHAT INFORMATION**
-
-🏷️ **Chat Title:** {message.chat.title if hasattr(message.chat, 'title') else 'Private Chat'}
-🆔 **Chat ID:** `{message.chat.id}`
-👥 **Type:** {message.chat.type.title()}
-{'👤 **Members:** ' + str(message.chat.members_count) if hasattr(message.chat, 'members_count') else ''}
-
-👤 **Your Info:**
-• ID: `{message.from_user.id}`
-• Name: {message.from_user.first_name or ''}
-• Username: @{message.from_user.username or 'None'}
-        """
-        
-        buttons = [
-            [
-                InlineKeyboardButton("📋 Copy Chat ID", callback_data=f"copyid:{message.chat.id}"),
-                InlineKeyboardButton("👤 User Info", callback_data=f"userinfo:{message.from_user.id}")
-            ],
-            [
-                InlineKeyboardButton("👥 Member List", callback_data="member_list"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_chatid")
-            ]
-        ]
-    
-    elif command == "fwdid":
-        # Get ID of forwarded message sender
-        if not message.reply_to_message or not message.reply_to_message.forward_from:
-            await message.reply_text(
-                f"{beautiful_header('info')}\n\n"
-                "❌ **No Forwarded Message**\n\n"
-                "Reply to a **forwarded message** to get the original sender's information."
-                f"{beautiful_footer()}"
-            )
-            return
-        
-        original_sender = message.reply_to_message.forward_from
-        forwarder = message.reply_to_message.from_user
-        
-        response = f"""
-{beautiful_header('info')}
-
-📩 **FORWARDED MESSAGE INFO**
-
-👤 **ORIGINAL SENDER:**
-• **Name:** {original_sender.first_name or ''} {original_sender.last_name or ''}
-• **ID:** `{original_sender.id}`
-• **Username:** @{original_sender.username or 'None'}
-• **Type:** {'🤖 Bot' if original_sender.is_bot else '👤 Human'}
-• **Premium:** {'✅ Yes' if getattr(original_sender, 'is_premium', False) else '❌ No'}
-
-📤 **FORWARDED BY:**
-• **Name:** {forwarder.first_name or ''} {forwarder.last_name or ''}
-• **ID:** `{forwarder.id}`
-• **Username:** @{forwarder.username or 'None'}
-
-🕒 **TIME:** {message.reply_to_message.date.strftime('%Y-%m-%d %H:%M:%S') if hasattr(message.reply_to_message, 'date') else 'Unknown'}
-💬 **CHAT:** {message.chat.title if hasattr(message.chat, 'title') else 'This chat'}
-        """
-        
-        buttons = [
-            [
-                InlineKeyboardButton("📋 Copy Sender ID", callback_data=f"copyid:{original_sender.id}"),
-                InlineKeyboardButton("📋 Copy Forwarder ID", callback_data=f"copyid:{forwarder.id}")
-            ],
-            [
-                InlineKeyboardButton("👤 Sender Info", callback_data=f"userinfo:{original_sender.id}"),
-                InlineKeyboardButton("👤 Forwarder Info", callback_data=f"userinfo:{forwarder.id}")
-            ],
-            [
-                InlineKeyboardButton("🔄 Check Again", callback_data="check_forward"),
-                InlineKeyboardButton("📤 Share", callback_data=f"share_forward:{original_sender.id}")
-            ]
-        ]
-    
-    else:
-        return
-    
-    await message.reply_text(
-        response + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-# ================= CALLBACK HANDLERS FOR ID COMMAND =================
-@app.on_callback_query(filters.regex("^copyid:"))
-async def copy_id_callback(client, cq):
-    """Copy ID to clipboard callback"""
-    try:
-        user_id = cq.data.split(":")[1]
-        await cq.answer(f"ID copied: {user_id}\n\nYou can paste it anywhere!", show_alert=True)
-        
-        # Update message to show copied status
-        await cq.message.edit_text(
-            cq.message.text + f"\n\n✅ **ID Copied:** `{user_id}`",
-            reply_markup=cq.message.reply_markup
-        )
-    except:
-        await cq.answer("Failed to copy ID", show_alert=True)
-
-@app.on_callback_query(filters.regex("^refresh_id$"))
-async def refresh_id_callback(client, cq):
-    """Refresh ID information"""
-    try:
-        await cq.answer("Refreshing...")
-        
-        # Create a fake message to reuse the ID command
-        class FakeMessage:
-            def __init__(self, original_msg):
-                self.chat = original_msg.chat
-                self.from_user = original_msg.from_user
-                self.command = ["id"]
-                self.reply_to_message = None
-                self.text = "/id"
-        
-        fake_msg = FakeMessage(cq.message)
-        
-        # Call the ID command again
-        await enhanced_id_command(client, fake_msg)
-        
-        # Delete old message
-        await cq.message.delete()
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
-
-@app.on_callback_query(filters.regex("^userinfo:"))
-async def userinfo_callback(client, cq):
-    """Show detailed user info"""
-    try:
-        user_id = int(cq.data.split(":")[1])
-        user = await client.get_users(user_id)
-        
-        # Get detailed information
-        info_text = f"""
-{beautiful_header('info')}
-
-👤 **DETAILED USER INFORMATION**
-
-**Basic Information:**
-• **Full Name:** {user.first_name or ''} {user.last_name or ''}
-• **User ID:** `{user.id}`
-• **Username:** @{user.username if user.username else 'None'}
-• **Premium User:** {'✅ Yes' if getattr(user, 'is_premium', False) else '❌ No'}
-• **Verified:** {'✅ Yes' if getattr(user, 'is_verified', False) else '❌ No'}
-• **Bot:** {'🤖 Yes' if user.is_bot else '👤 Human'}
-
-**Technical Information:**
-• **DC ID:** {user.dc_id if user.dc_id else 'Unknown'}
-• **Language:** {user.language_code if user.language_code else 'Unknown'}
-• **Scam:** {'⚠️ Yes' if getattr(user, 'is_scam', False) else '✅ No'}
-• **Fake:** {'⚠️ Yes' if getattr(user, 'is_fake', False) else '✅ No'}
-
-**Status:**
-{await get_user_status(client, user_id)}
-
-**Bio:**
-{await get_user_bio(client, user_id) or 'No bio available'}
-
-**Profile Photos:** {await get_profile_photos_count(client, user_id)}
-**Account Age:** {await get_account_age(user.id)}
-        """
-        
-        await cq.message.edit_text(
-            info_text + beautiful_footer(),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Back", callback_data="back_to_main_id")],
-                [InlineKeyboardButton("📋 Copy ID", callback_data=f"copyid:{user_id}")]
-            ])
-        )
-        
-        await cq.answer("User info loaded")
-        
-    except Exception as e:
-        await cq.answer(f"Error: {str(e)[:50]}", show_alert=True)
 
 # ================= SIMPLE ID COMMAND (BACKUP) =================
 
@@ -9278,207 +6313,6 @@ async def simple_id_commands(client, message: Message):
             f"{beautiful_footer()}"
         )
 
-# ================= FORWARDED MESSAGE ID =================
-@app.on_message(filters.command("fwdid") & filters.group)
-async def forwarded_id_command(client, message: Message):
-    """Get ID of forwarded message sender"""
-    if not message.reply_to_message or not message.reply_to_message.forward_from:
-        await message.reply_text(
-            f"{beautiful_header('info')}\n\n"
-            f"❌ **No forwarded message**\n\n"
-            f"Please reply to a **forwarded message** to get the original sender's ID."
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    original_sender = message.reply_to_message.forward_from
-    
-    await message.reply_text(
-        f"{beautiful_header('info')}\n\n"
-        f"📩 **FORWARDED MESSAGE INFO**\n\n"
-        f"👤 **Original Sender:**\n"
-        f"• Name: {original_sender.first_name or ''} {original_sender.last_name or ''}\n"
-        f"• ID: `{original_sender.id}`\n"
-        f"• Username: @{original_sender.username or 'None'}\n"
-        f"• Bot: {'🤖 Yes' if original_sender.is_bot else '👤 Human'}\n\n"
-        f"💬 **Forwarded by:** {message.reply_to_message.from_user.mention}\n"
-        f"🕒 **Time:** {message.reply_to_message.date.strftime('%Y-%m-%d %H:%M:%S') if hasattr(message.reply_to_message, 'date') else 'Unknown'}"
-        f"{beautiful_footer()}"
-    )
-
-# ================= BULK ID EXTRACTOR =================
-# ================= BULK ID EXTRACTOR COMMAND =================
-@app.on_message(filters.command(["extract", "getids", "bulkid"]) & filters.group)
-async def bulk_id_extractor(client, message: Message):
-    """
-    Extract IDs from multiple users mentioned in one command
-    Supports: @mentions, user IDs, reply, and combinations
-    """
-    
-    extracted_users = []
-    extraction_methods = []
-    
-    # Check permissions for sensitive info
-    can_extract_all = await can_user_restrict(client, message.chat.id, message.from_user.id) or is_admin(message.from_user.id)
-    
-    # METHOD 1: Check mentioned users (@username)
-    if message.entities:
-        for entity in message.entities:
-            if entity.type == "mention":
-                username = message.text[entity.offset:entity.offset + entity.length]
-                try:
-                    user = await client.get_users(username[1:])  # Remove @
-                    extracted_users.append(user)
-                    extraction_methods.append(f"@{user.username}")
-                except:
-                    pass
-    
-    # METHOD 2: Check user IDs in message text
-    import re
-    user_ids = re.findall(r'\b\d{8,10}\b', message.text)
-    for user_id in user_ids:
-        try:
-            user = await client.get_users(int(user_id))
-            if user not in extracted_users:
-                extracted_users.append(user)
-                extraction_methods.append(f"ID:{user_id}")
-        except:
-            pass
-    
-    # METHOD 3: Reply to message
-    if message.reply_to_message:
-        user = message.reply_to_message.from_user
-        if user not in extracted_users:
-            extracted_users.append(user)
-            extraction_methods.append("Reply")
-        
-        # Also check forwarded
-        if message.reply_to_message.forward_from:
-            fwd_user = message.reply_to_message.forward_from
-            if fwd_user not in extracted_users:
-                extracted_users.append(fwd_user)
-                extraction_methods.append("Forward")
-    
-    # METHOD 4: Add command sender
-    if message.from_user not in extracted_users:
-        extracted_users.append(message.from_user)
-        extraction_methods.append("Self")
-    
-    # Check if we found any users
-    if not extracted_users:
-        await message.reply_text(
-            f"{beautiful_header('info')}\n\n"
-            "❌ **No Users Found**\n\n"
-            "**Usage Examples:**\n"
-            "• `/extract @user1 @user2 @user3`\n"
-            "• `/extract 123456789 987654321`\n"
-            "• `/extract` (reply to message)\n"
-            "• `/extract @user1 123456789` (mixed)\n\n"
-            "**Supports:**\n"
-            "• @mentions\n"
-            "• User IDs (8-10 digits)\n"
-            "• Reply to messages\n"
-            "• Forwarded messages\n"
-            "• Mixed formats"
-            f"{beautiful_footer()}"
-        )
-        return
-    
-    # Build extraction result
-    extraction_id = int(datetime.now().timestamp()) % 10000
-    
-    result_text = f"""
-{beautiful_header('info')}
-
-📋 **BULK ID EXTRACTION** #{extraction_id}
-
-✅ **Found {len(extracted_users)} Users:**
-"""
-    
-    # User list with details
-    user_list = []
-    all_ids = []
-    
-    for i, user in enumerate(extracted_users):
-        method = extraction_methods[i] if i < len(extraction_methods) else "Unknown"
-        
-        user_info = f"{i+1}. "
-        
-        # Add method icon
-        if "Reply" in method:
-            user_info += "↩️ "
-        elif "Forward" in method:
-            user_info += "📩 "
-        elif "Self" in method:
-            user_info += "👤 "
-        elif "@" in method:
-            user_info += "🔍 "
-        elif "ID" in method:
-            user_info += "🆔 "
-        
-        user_info += f"{user.first_name or 'User'}"
-        
-        if user.last_name:
-            user_info += f" {user.last_name}"
-        
-        user_info += f" (@{user.username})" if user.username else ""
-        user_info += f" - `{user.id}`"
-        user_info += f" [{method}]"
-        
-        user_list.append(user_info)
-        all_ids.append(str(user.id))
-    
-    result_text += "\n".join(user_list)
-    
-    # Summary
-    result_text += f"\n\n📊 **SUMMARY:**"
-    result_text += f"\n• Total Users: {len(extracted_users)}"
-    result_text += f"\n• With Username: {sum(1 for u in extracted_users if u.username)}"
-    result_text += f"\n• Bots: {sum(1 for u in extracted_users if u.is_bot)}"
-    result_text += f"\n• Premium: {sum(1 for u in extracted_users if getattr(u, 'is_premium', False))}"
-    
-    # All IDs in one line
-    result_text += f"\n\n📎 **ALL IDs:**\n`{', '.join(all_ids)}`"
-    
-    # Export options
-    result_text += f"\n\n💾 **EXPORT OPTIONS:**"
-    result_text += f"\n• CSV format available"
-    result_text += f"\n• JSON format available"
-    
-    # Create buttons
-    buttons = []
-    
-    # Quick actions
-    quick_row = []
-    if len(extracted_users) > 1 and can_extract_all:
-        quick_row.append(InlineKeyboardButton("📋 Copy All IDs", callback_data=f"copy_all:{','.join(all_ids)}"))
-        quick_row.append(InlineKeyboardButton("📤 Export CSV", callback_data=f"export_csv:{','.join(all_ids)}"))
-    
-    if quick_row:
-        buttons.append(quick_row)
-    
-    # Individual user buttons (limit to 5 users)
-    if len(extracted_users) <= 5:
-        for i, user in enumerate(extracted_users[:5]):
-            buttons.append([
-                InlineKeyboardButton(f"👤 {user.first_name[:10]}", callback_data=f"userinfo:{user.id}"),
-                InlineKeyboardButton(f"📋 Copy", callback_data=f"copyid:{user.id}")
-            ])
-    
-    # Navigation buttons
-    buttons.append([
-        InlineKeyboardButton("🔄 Extract Again", callback_data="extract_again"),
-        InlineKeyboardButton("📊 Stats", callback_data="extraction_stats")
-    ])
-    
-    buttons.append([
-        InlineKeyboardButton("❌ Close", callback_data="close_extraction")
-    ])
-    
-    await message.reply_text(
-        result_text + beautiful_footer(),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
 # ================= MYBOTADMIN COMMAND =================
 @app.on_message(filters.command("mybotadmin") & (filters.group | filters.private))
 async def mybotadmin_command(client, message: Message):
