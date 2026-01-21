@@ -582,9 +582,8 @@ def abuse_warning(uid):
 # ================= HELPER FUNCTIONS =================
 # ================= FIXED HELPER FUNCTIONS =================
 
-def is_bot_admin(uid):
-    """Check if user is bot admin"""
-    cur.execute("SELECT 1 FROM admins WHERE admin_id=?", (uid,))
+def is_bot_admin(user_id):
+    cur.execute("SELECT 1 FROM admins WHERE admin_id=?", (user_id,))
     return cur.fetchone() is not None
 
 def is_super_admin(uid):
@@ -740,7 +739,7 @@ async def enhanced_start_handler(client, message: Message):
     user_name = user.first_name or "Friend"
     
     # Check admin status
-    is_bot_admin_user = is_admin(user.id)
+    is_bot_admin_user = is_bot_admin(user.id)
     is_super_admin_user = (user.id == SUPER_ADMIN)
     
     # Beautiful animated loading
