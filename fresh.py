@@ -323,6 +323,18 @@ CREATE TABLE IF NOT EXISTS abuse_warnings (
 )
 """)
 
+
+# ================= USER WARNINGS TABLE =================
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS user_warnings (
+    chat_id INTEGER,
+    user_id INTEGER,
+    warns INTEGER DEFAULT 0,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
 # ================= INDEX (FAST LOOKUP) =================
 
 cur.execute("""
@@ -3364,7 +3376,7 @@ async def welcome_with_userdata(client, update):
         return
 
     if (
-        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]
+        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
         and update.new_chat_member.status == ChatMemberStatus.MEMBER
     ):
         user = update.new_chat_member.user
