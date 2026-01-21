@@ -5897,8 +5897,15 @@ async def tag_all(client: Client, message: Message):
 @app.on_message(filters.command("tagadmin") & filters.group)
 async def tag_admins(client, message: Message):
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        text += premium_tag(m.user) + "\n"
+
+    async for m in client.get_chat_members(
+        message.chat.id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        # ADMINISTRATORS filter already includes OWNER
+        if m.user and not m.user.is_bot:
+            text += premium_tag(m.user) + "\n"
+
     await message.reply(text, disable_web_page_preview=True)
 
 # ================== STOP ==================
@@ -5915,10 +5922,18 @@ async def stop_cb(client, cb):
 @app.on_callback_query(filters.regex("tag_admin"))
 async def tag_admin_cb(client, cb):
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-        text += premium_tag(m.user) + "\n"
-    await cb.message.reply(text, disable_web_page_preview=True)
 
+    async for m in client.get_chat_members(
+        cb.message.chat.id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if m.user and not m.user.is_bot:
+            text += premium_tag(m.user) + "\n"
+
+    await cb.message.reply(
+        text,
+        disable_web_page_preview=True
+    )
 
 @app.on_message(filters.command("purge") & filters.group)
 async def purge_cmd(client, message):
