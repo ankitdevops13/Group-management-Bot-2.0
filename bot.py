@@ -5011,9 +5011,9 @@ async def bot_admin_lock_command(client, message: Message):
             "🔒 **BOT ADMIN LOCK SYSTEM**\n\n"
             "**Usage:** `/block <chat_id> <lock_type> [duration] [silent]`\n\n"
             "**Examples:**\n"
-            "• `/block -100123456789 all` - Lock everything\n"
-            "• `/block -100123456789 text 1h` - Lock text for 1 hour\n"
-            "• `/block -100123456789 media 30m silent` - Lock media silently\n\n"
+            "• `/gblock or gblock -100123456789 all` - Lock everything\n"
+            "• `/glock -100123456789 text 1h` - Lock text for 1 hour\n"
+            "• `/glock -100123456789 media 30m silent` - Lock media silently\n\n"
             "**Lock Types (17 options):**\n"
             "`all, text, media, stickers, polls, invites, pins, info, url, games, inline, voice, video, audio, documents, photos, forward`\n\n"
             "**Durations:** m=minutes, h=hours, d=days, w=weeks\n"
@@ -5575,13 +5575,19 @@ def update_cooldown(user_id):
     )
     conn.commit()
 
-async def is_gc_admin(client, chat_id, user_id):
+async def gc_admin(client, chat_id, user_id):
+    # 🔹 Bot admin always allowed
+    if user_id in INITIAL_ADMINS:
+        return True
+
+    # 🔹 Check group admin / owner
     async for m in client.get_chat_members(
         chat_id,
-        filter=ChatMembersFilter.ADMINISTRATORS
+        filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER
     ):
         if m.user and m.user.id == user_id:
             return True
+
     return False
 
 
@@ -5835,7 +5841,7 @@ async def tag_all(client: Client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    if not await check_admin_type(client, chat_id, user_id):
+    if not await is_group_admin(client, chat_id, user_id):
         return await message.reply("❌ **Only admin can use this command**")
 
     if is_on_cooldown(user_id):
@@ -5892,7 +5898,7 @@ async def tag_all(client: Client, message: Message):
 @app.on_message(filters.command("tagadmin") & filters.group)
 async def tag_admins(client, message: Message):
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+    async for m in client.get_chat_members(message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
         text += premium_tag(m.user) + "\n"
     await message.reply(text, disable_web_page_preview=True)
 
@@ -5910,7 +5916,7 @@ async def stop_cb(client, cb):
 @app.on_callback_query(filters.regex("tag_admin"))
 async def tag_admin_cb(client, cb):
     text = "👑 **𝗔𝗗𝗠𝗜𝗡 𝗧𝗔𝗚** 👑\n\n"
-    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS):
+    async for m in client.get_chat_members(cb.message.chat.id, filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
         text += premium_tag(m.user) + "\n"
     await cb.message.reply(text, disable_web_page_preview=True)
 
@@ -5920,7 +5926,7 @@ async def purge_cmd(client, message):
 
     silent = "-s" in message.command
 
-    if not await check_admin_type(client, message.chat.id, message.from_user.id):
+    if not await can_purge(client, message.chat.id, message.from_user.id):
         if not silent:
             await message.reply("❌ **Admin only command**")
         return
@@ -5985,7 +5991,7 @@ async def bulk_purge(client, message):
 
     silent = "-s" in message.command
 
-    if not await check_admin_type(client, message.chat.id, message.from_user.id):
+    if not await can_purge(client, message.chat.id, message.from_user.id):
         if not silent:
             await message.reply("❌ **Only Group Admin or Bot Admin can use this command**")
         return
