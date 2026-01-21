@@ -1,4 +1,4 @@
-import asyncio
+vnimport asyncio
 import re
 import glob  # For backup system
 import sqlite3
@@ -920,7 +920,7 @@ async def group_start_handler(client, message: Message):
     chat = message.chat
     
     # Check user permissions in this group
-    is_bot_admin_user = is_admin(user.id)
+    is_bot_admin_user = is_bot_admin(user.id)
     is_group_admin_user = await can_user_restrict(client, chat.id, user.id)
     
     # Get group info
