@@ -2765,7 +2765,7 @@ async def auto_unlock_by_id(client, chat_id, duration):
     except Exception as e:
         print(f"Error in auto-unlock: {e}")
 
-  def parse_time_duration(time_str):
+def parse_time_duration(time_str):
     """Parse time duration string to timedelta"""
     try:
         time_str = time_str.lower().strip()
