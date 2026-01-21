@@ -303,12 +303,6 @@ CREATE INDEX IF NOT EXISTS idx_reports
 ON user_reports(chat_id, status)
 """)
 
-# ======================================================
-# ================= CLEAN OLD / UNUSED =================
-# (IMPORTANT — must NOT be used anywhere)
-# ======================================================
-cur.execute("DROP TABLE IF EXISTS user_warnings")
-cur.execute("DROP TABLE IF EXISTS abuse_warnings")
 # ================= INSERT INITIAL ADMINS =================
 for admin_id in INITIAL_ADMINS:
     cur.execute(
@@ -574,7 +568,10 @@ def abuse_warning(uid):
     
 # ================= HELPER FUNCTIONS =================
 # ================= FIXED HELPER FUNCTIONS =================
-
+def is_admin(uid):
+    cur.execute("SELECT 1 FROM admins WHERE admin_id=?", (uid,))
+    return cur.fetchone() is not None
+    
 def is_bot_admin(user_id):
     cur.execute("SELECT 1 FROM admins WHERE admin_id=?", (user_id,))
     return cur.fetchone() is not None
@@ -5578,7 +5575,7 @@ def update_cooldown(user_id):
     )
     conn.commit()
 
-async def is_admin(client, chat_id, user_id):
+async def is_gc_admin(client, chat_id, user_id):
     async for m in client.get_chat_members(
         chat_id,
         filter=ChatMembersFilter.ADMINISTRATORS
@@ -5838,7 +5835,7 @@ async def tag_all(client: Client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    if not await is_admin(client, chat_id, user_id):
+    if not await check_admin_type(client, chat_id, user_id):
         return await message.reply("❌ **Only admin can use this command**")
 
     if is_on_cooldown(user_id):
@@ -6073,8 +6070,6 @@ async def admin_call_detector(client, message):
         )
 
 
-# ================== RUN ==================
-app.run()
 
 # ================= ADDITIONAL HELPER FUNCTIONS =================
 async def is_group_admin(client, chat_id, user_id):
@@ -6861,7 +6856,7 @@ async def user_handler(client, message: Message):
     uid = message.from_user.id
 
     # ---------- ADMIN CHECK ----------
-    if is_bot_admin(uid):
+    if is_admin(uid):
         return
 
     # ---------- BLOCK CHECK ----------
