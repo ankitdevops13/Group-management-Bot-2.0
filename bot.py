@@ -5580,15 +5580,14 @@ async def gc_admin(client, chat_id, user_id):
     if user_id in INITIAL_ADMINS:
         return True
 
-    # 🔹 Check group admin / owner
-    async for m in client.get_chat_members(
-        chat_id,
-        filter=ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER
-    ):
-        if m.user and m.user.id == user_id:
-            return True
-
-    return False
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        )
+    except:
+        return False
 
 
 
