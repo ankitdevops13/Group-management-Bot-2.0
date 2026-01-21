@@ -6860,7 +6860,7 @@ async def user_handler(client, message: Message):
         return
 
     # ---------- BLOCK CHECK ----------
-    if is_blocked(uid):
+    if is_blocked_user(uid):
         await message.reply_text(
             "🔴 **Access Blocked**\n"
             "Aap admin dwara block kiye gaye hain."
