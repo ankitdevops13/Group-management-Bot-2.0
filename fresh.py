@@ -1360,6 +1360,69 @@ async def universal_kick(client, message: Message):
         )
 
 
+# ================================= Pin System ========================
+@app.on_message(filters.command(["pin", "bpin"]) & filters.group)
+async def pin_message(client, message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # Permission check
+    is_bot_admin_user = is_admin(user_id)
+    can_pin = await can_user_restrict(client, chat_id, user_id)
+
+    if not (is_bot_admin_user or can_pin):
+        return await message.reply_text("❌ You don't have permission to pin messages.")
+
+    # Bot permission
+    bot = await client.get_chat_member(chat_id, "me")
+    if bot.status != ChatMemberStatus.ADMINISTRATOR or not bot.privileges.can_pin_messages:
+        return await message.reply_text("❌ Make me admin with **Pin Messages** permission.")
+
+    # Target message
+    if message.reply_to_message:
+        target_msg_id = message.reply_to_message.id
+    elif len(message.command) > 1 and message.command[1].isdigit():
+        target_msg_id = int(message.command[1])
+    else:
+        return await message.reply_text(
+            "❌ Reply to a message or use:\n`/pin <message_id>`"
+        )
+
+    try:
+        await client.pin_chat_message(
+            chat_id=chat_id,
+            message_id=target_msg_id,
+            disable_notification=True
+        )
+        await message.reply_text("📌 **Message pinned successfully!**")
+    except Exception as e:
+        await message.reply_text(f"❌ Pin failed\n`{e}`")
+
+
+@app.on_message(filters.command(["unpin", "bunpin"]) & filters.group)
+async def unpin_message(client, message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # Permission check
+    is_bot_admin_user = is_admin(user_id)
+    can_pin = await can_user_restrict(client, chat_id, user_id)
+
+    if not (is_bot_admin_user or can_pin):
+        return await message.reply_text("❌ You don't have permission to unpin messages.")
+
+    # Bot permission
+    bot = await client.get_chat_member(chat_id, "me")
+    if bot.status != ChatMemberStatus.ADMINISTRATOR or not bot.privileges.can_pin_messages:
+        return await message.reply_text("❌ Make me admin with **Pin Messages** permission.")
+
+    try:
+        await client.unpin_chat_message(chat_id)
+        await message.reply_text("📌 **Message unpinned successfully!**")
+    except Exception as e:
+        await message.reply_text(f"❌ Unpin failed\n`{e}`")
+
+
 # ================= ADMIN MANAGEMENT COMMANDS =================
 @app.on_message(filters.command("addbotadmin") & filters.private)
 async def add_bot_admin_command(client, message: Message):
@@ -4188,5 +4251,104 @@ async def final_auto_abuse_handler(client, message):
             f"❌ Reason: Repeated abuse (5/5)"
             f"{beautiful_footer()}"
         )
+
+
+async def check_mutes_task():
+    """Auto-unmute users after duration (including abuse mutes)"""
+    while True:
+        try:
+            current_time = datetime.now(timezone.utc)
+            
+            for chat_id in list(user_mutes.keys()):
+                for user_id in list(user_mutes[chat_id].keys()):
+                    unmute_time = user_mutes[chat_id][user_id]
+                    
+                    if current_time >= unmute_time:
+                        try:
+                            await app.restrict_chat_member(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                permissions=ChatPermissions(
+                                    can_send_messages=True,
+                                    can_send_media_messages=True,
+                                    can_send_other_messages=True,
+                                    can_add_web_page_previews=True,
+                                    can_send_polls=True,
+                                    can_change_info=False,
+                                    can_invite_users=True,
+                                    can_pin_messages=False
+                                )
+                            )
+                            
+                            # Notify user about auto-unmute
+                            try:
+                                await app.send_message(
+                                    user_id,
+                                    f"{beautiful_header('support')}\n\n"
+                                    f"⏰ **Auto-unmute Complete**\n\n"
+                                    f"Your mute duration has ended.\n"
+                                    f"You can now send messages in the group.\n\n"
+                                    f"Please follow group rules."
+                                    f"{beautiful_footer()}"
+                                )
+                            except:
+                                pass
+                            
+                            del user_mutes[chat_id][user_id]
+                            
+                        except Exception as e:
+                            print(f"Error auto-unmuting: {e}")
+        
+        except Exception as e:
+            print(f"Error in check_mutes_task: {e}")
+        
+        await asyncio.sleep(60)  # Check every minute
+        
+
+async def start_background_tasks():
+    """Start all background tasks"""
+    tasks = [
+        check_mutes_task(),
+        cleanup_abuse_cache_task(),  # Add this line
+    ]
+    
+    for task in tasks:
+        asyncio.create_task(task)
+        
 # ================== RUN ==================
-app.run()
+# ================= MAIN EXECUTION =================
+if __name__ == "__main__":
+    print("=" * 50)
+    print(f"🤖 {BOT_BRAND}")
+    print(f"✨ {BOT_TAGLINE}")
+    print("=" * 50)
+    print("✅ Bot starting with features:")
+    print("• Support System")
+    print("• Group Management")
+    print("• Bot Admin System")
+    print("• Group Admin System")
+    print("• Admin Type Checking")
+    print("• Beautiful UI")
+    print("• Auto-Moderation System with abuse detection")
+    print(f"• {len(ABUSE_WORDS)} abusive words/phrases in database")
+    print("=" * 50)
+    print(f"📋 Initialized {len(INITIAL_ADMINS)} bot admins")
+    
+    # Create event loop
+    loop = asyncio.get_event_loop()
+    
+    # Start background tasks
+    try:
+        loop.create_task(start_background_tasks())
+        print("✅ Background tasks initialized")
+    except Exception as e:
+        print(f"⚠️ Could not start background tasks: {e}")
+    
+    # Run the bot
+    print("🚀 Starting bot...")
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        print("\n👋 Bot stopped by user")
+    except Exception as e:
+        print(f"❌ Bot crashed: {e}")
