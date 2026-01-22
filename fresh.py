@@ -1406,31 +1406,59 @@ async def unpin_message(client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    # Permission check
+    # ===== Permission check =====
     is_bot_admin_user = is_admin(user_id)
     can_pin = await can_user_restrict(client, chat_id, user_id)
 
     if not (is_bot_admin_user or can_pin):
-        return await message.reply_text("❌ You don't have permission to unpin messages.")
+        return await message.reply_text(
+            "❌ You don't have permission to unpin messages.",
+            parse_mode=None
+        )
 
-    # Check bot admin + pin permission
-    bot = await client.get_chat_member(chat_id, "me")
-    if bot.status != ChatMemberStatus.ADMINISTRATOR or not bot.privileges.can_pin_messages:
-        return await message.reply_text("❌ Make me admin with **Pin Messages** permission.")
+    # ===== Bot permission check =====
+    try:
+        bot = await client.get_chat_member(chat_id, "me")
+        if bot.status != ChatMemberStatus.ADMINISTRATOR:
+            return await message.reply_text(
+                "❌ Make me admin with **Pin Messages** permission.",
+                parse_mode=None
+            )
 
+        if hasattr(bot, "privileges") and not bot.privileges.can_pin_messages:
+            return await message.reply_text(
+                "❌ I need **Pin Messages** permission.",
+                parse_mode=None
+            )
+    except:
+        return await message.reply_text(
+            "❌ Unable to verify bot permissions.",
+            parse_mode=None
+        )
+
+    # ===== MAIN LOGIC =====
     try:
         chat = await client.get_chat(chat_id)
 
         # 🔥 MOST IMPORTANT CHECK
         if not chat.pinned_message:
-            return await message.reply_text("ℹ️ No pinned message found in this chat.")
+            return await message.reply_text(
+                "ℹ️ No pinned message found in this chat.",
+                parse_mode=None
+            )
 
         await client.unpin_chat_message(chat_id)
 
-        await message.reply_text("📌 **Pinned message unpinned successfully!**")
+        await message.reply_text(
+            "📌 Pinned message unpinned successfully!",
+            parse_mode=None
+        )
 
     except Exception as e:
-        await message.reply_text(f"❌ Unpin failed\n`{e}`")
+        await message.reply_text(
+            f"❌ Unpin failed\nError: {e}",
+            parse_mode=None
+        )
 
 
 # ================= ADMIN MANAGEMENT COMMANDS =================
@@ -4314,6 +4342,366 @@ async def check_mutes_task():
         
         await asyncio.sleep(60)  # Check every minute
         
+
+
+
+def abuse_warning(chat_id, user_id):
+    cur.execute(
+        "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
+        (chat_id, user_id)
+    )
+    cur.execute(
+        "UPDATE abuse_warnings SET warns = warns + 1 WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    conn.commit()
+    cur.execute(
+        "SELECT warns FROM abuse_warnings WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id)
+    )
+    return cur.fetchone()[0]
+
+
+def contains_abuse(text: str) -> bool:
+    if not text:
+        return False
+
+    text = text.lower()
+    return bool(ABUSE_REGEX.search(text))
+    
+# ================= SUPPORT SYSTEM =================
+def admin_button(uid):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🟢 Reply", callback_data=f"reply:{uid}"),
+            InlineKeyboardButton("🚫 Block", callback_data=f"block:{uid}")
+        ],
+        [
+            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock:{uid}"),
+            InlineKeyboardButton("📜 History", callback_data=f"history:{uid}")
+        ]
+    ])
+
+
+@app.on_callback_query(filters.regex("^rules$"))
+async def rules_cb(client, cq):
+    await cq.answer()
+    await cq.message.reply_text(
+        f"{beautiful_header('rules')}\n\n"
+        "📜 **Support Rules**\n\n"
+        "✅ Respectful language ka use karein\n"
+        "❌ Abuse bilkul allowed nahi\n"
+        "🚫 Repeat violation par block\n"
+        "⏳ Thoda patience rakhein\n\n"
+        "🙏 Dhanyavaad"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_callback_query(filters.regex("^contact_support$"))
+async def contact_support_cb(client, cq):
+    await cq.answer()
+    await cq.message.reply_text(
+        f"{beautiful_header('support')}\n\n"
+        "📩 **Contact Support**\n\n"
+        "Bas apna message likhiye ✍️\n"
+        "Support team jald reply karegi 😊"
+        f"{beautiful_footer()}"
+    )
+
+
+@app.on_callback_query(filters.regex("^reply:"))
+async def cb_reply(client, cq):
+
+    if cq.from_user.is_bot:
+        return
+
+    admin_id = cq.from_user.id
+
+    if not is_admin(admin_id):
+        await cq.answer("Not allowed", show_alert=True)
+        return
+
+    try:
+        user_id = int(cq.data.split(":")[1])
+    except:
+        await cq.answer("Invalid target", show_alert=True)
+        return
+
+    cur.execute(
+        "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
+        (admin_id, user_id)
+    )
+    conn.commit()
+
+    await cq.message.reply_text(
+        f"{beautiful_header('support')}\n\n"
+        "✍️ **Reply Mode ON**\n\n"
+        "Ab aap apna message (text / photo / video / document / voice) bhejein.\n"
+        "Agla message **direct user ko** jayega ✅"
+        f"{beautiful_footer()}"
+    )
+
+    await cq.answer("Reply mode enabled ✅")
+
+@app.on_message(filters.private, group=4)
+async def user_handler(client, message: Message):
+
+    if not message.from_user or message.from_user.is_bot:
+        return
+
+    uid = message.from_user.id
+
+    # ---------- ADMIN CHECK ----------
+    if is_admin(uid):
+        return
+
+    # ---------- BLOCK CHECK ----------
+    if is_blocked_user(uid):
+        await message.reply_text(
+            "🔴 **Access Blocked**\n"
+            "Aap admin dwara block kiye gaye hain."
+            + beautiful_footer()
+        )
+        return
+
+    # ---------- ABUSE CHECK ----------
+    abuse_text = message.text or message.caption
+    if abuse_text and contains_abuse(abuse_text):
+
+        # ✅ FIXED CALL
+        count = abuse_warning(message.chat.id, uid)
+
+        if count >= 2:
+            cur.execute(
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+                (uid,)
+            )
+            conn.commit()
+
+            await message.reply_text(
+                "🔴 **Blocked**\nRepeated abusive language detected."
+                + beautiful_footer()
+            )
+            return
+        else:
+            await message.reply_text(
+                "⚠️ **Warning**\nAbusive language detected. Please behave."
+                + beautiful_footer()
+            )
+            return
+
+    # ---------- AUTO REPLY ----------
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (uid,)
+    )
+    first_time = not cur.fetchone()
+
+    if first_time:
+        await message.reply_text(
+            "📨 **Message Received!**\n"
+            "Thanks for contacting us ✨\n"
+            "Our **Ankit Shakya** will reply shortly ⏳"
+            + beautiful_footer()
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+            (uid,)
+        )
+        conn.commit()
+    else:
+        await message.reply_text(
+            "✅ **Message received**"
+            + beautiful_footer()
+        )
+
+    # ---------- FORWARD TO ADMINS ----------
+    cur.execute("SELECT admin_id FROM admins")
+    admins = cur.fetchall()
+
+    header = (
+        f"{beautiful_header('support')}\n\n"
+        "📩 **New User Message**\n\n"
+        f"👤 Name: {message.from_user.first_name}\n"
+        f"🆔 ID: `{uid}`\n"
+        f"👤 Username: @{message.from_user.username or 'None'}\n\n"
+    )
+
+    for (aid,) in admins:
+        try:
+            if message.text:
+                await client.send_message(
+                    aid,
+                    f"{header}💬 {message.text}",
+                    reply_markup=admin_button(uid)
+                )
+            else:
+                await message.copy(
+                    aid,
+                    caption=header,
+                    reply_markup=admin_button(uid)
+                )
+        except:
+            continue
+
+# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
+
+@app.on_message(filters.private, group=0)
+async def admin_reply_handler(client, message: Message):
+
+    if message.from_user.is_bot:
+        return
+
+    admin_id = message.from_user.id
+
+    if not is_admin(admin_id):
+        return
+
+    cur.execute(
+        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    row = cur.fetchone()
+
+    if not row:
+        return
+
+    user_id = row[0]
+
+    # Clear reply mode first
+    cur.execute(
+        "DELETE FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    conn.commit()
+
+    try:
+        if message.text:
+            await client.send_message(
+                user_id,
+                f"{beautiful_header('SUPPORT REPLY')}\n\n"
+                f"💌 {message.text}\n\n"
+                f"{beautiful_footer()}"
+            )
+            mtype, content = "text", message.text
+        else:
+            await message.copy(user_id)
+            mtype, content = "media", "MEDIA"
+
+        cur.execute(
+            """
+            INSERT INTO contact_history
+            (user_id, sender, message_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, "admin", mtype, content)
+        )
+        conn.commit()
+
+        await message.reply_text("✅ Reply sent to user")
+
+    except Exception as e:
+        await message.reply_text(
+            f"{beautiful_header('alert')}\n\n"
+            f"❌ Failed to send reply\n`{e}`"
+            f"{beautiful_footer()}"
+        )
+        
+
+# ================= BLOCK / UNBLOCK / HISTORY =================
+@app.on_callback_query(filters.regex("^block:"))
+async def cb_block(client, cq):
+    user_id = int(cq.data.split(":")[1])
+    cur.execute("INSERT OR IGNORE INTO blocked_users VALUES (?)", (user_id,))
+    conn.commit()
+    try:
+        await client.send_message(user_id, footer("🔴 **You are blocked by admin.**"))
+    except:
+        pass
+    await cq.answer("Blocked")
+
+@app.on_callback_query(filters.regex("^unblock:"))
+async def cb_unblock(client, cq):
+    user_id = int(cq.data.split(":")[1])
+    cur.execute("DELETE FROM blocked_users WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM abuse_warnings WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM auto_reply_sent WHERE user_id=?", (user_id,))
+    conn.commit()
+    try:
+        await client.send_message(user_id, footer("✅ **You are unblocked now.**"))
+    except:
+        pass
+    await cq.answer("Unblocked")
+
+@app.on_callback_query(filters.regex("^history:"))
+async def cb_history(client, cq):
+    user_id = int(cq.data.split(":")[1])
+    cur.execute("""
+        SELECT sender,message_type,content,timestamp
+        FROM contact_history
+        WHERE user_id=?
+        ORDER BY id DESC LIMIT 5
+    """, (user_id,))
+    rows = cur.fetchall()
+
+    text = f"📜 **History ({user_id})**\n\n"
+    for s,t,c,ts in rows:
+        text += f"🕒 {ts}\n{s.upper()} | {t}\n{c}\n———\n"
+
+    await cq.message.reply_text(text[:3900])
+    await cq.answer()
+
+# ================= ADMIN ADD / REMOVE =================
+@app.on_message(filters.command("addadmin") & filters.private)
+async def add_admin(client, message: Message):
+    if message.from_user.id != SUPER_ADMIN:
+        return
+    uid = int(message.command[1])
+    cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (uid,))
+    conn.commit()
+    await message.reply_text(f"✅ `{uid}` added as admin")
+
+@app.on_message(filters.command("removeadmin") & filters.private)
+async def remove_admin(client, message: Message):
+    if message.from_user.id != SUPER_ADMIN:
+        return
+    uid = int(message.command[1])
+    if uid == SUPER_ADMIN:
+        return
+    cur.execute("DELETE FROM admins WHERE admin_id=?", (uid,))
+    conn.commit()
+    await message.reply_text(f"🚫 `{uid}` removed from admins")
+
+# ================= CSV EXPORT =================
+@app.on_message(filters.command("exportcsv") & filters.private)
+async def export_csv(client, message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    cur.execute("SELECT DISTINCT user_id FROM contact_history")
+    users = cur.fetchall()
+
+    with open("users.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["user_id"])
+        for u in users:
+            w.writerow(u)
+
+    cur.execute("SELECT user_id,sender,message_type,content,timestamp FROM contact_history")
+    rows = cur.fetchall()
+
+    with open("chat_history.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["user_id","sender","type","content","timestamp"])
+        for r in rows:
+            w.writerow(r)
+
+    await client.send_document(message.chat.id, "users.csv")
+    await client.send_document(message.chat.id, "chat_history.csv")
+
+    os.remove("users.csv")
+    os.remove("chat_history.csv")
+
 
 async def start_background_tasks():
     """Start all background tasks"""
