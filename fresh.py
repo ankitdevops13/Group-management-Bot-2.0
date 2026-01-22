@@ -3342,7 +3342,6 @@ MY_ID_CARD_PRIVATE = """
 🤖 **Account:** {account}
 
 ━━━━━━━━━━━━━━━━━━━
-🆔 **Chat ID:** `{chat_id}`
 💬 **Chat Type:** Private
 📩 **Message ID:** `{message_id}`
 🕒 **Time:** {time}
@@ -3925,7 +3924,6 @@ async def myid_command(client, message: Message):
             user_id=user.id,
             username=username,
             account=account,
-            chat_id=chat.id,
             message_id=message.id,
             time=time_now
         )
@@ -3970,7 +3968,7 @@ ADMIN_KEYWORDS = [
     "help", "support", "mod", "moderator"
 ]
 
-@app.on_message(filters.group & filters.text & ~filters.me)
+@app.on_message(filters.group & filters.text, group=1)
 async def admin_call_detector(client, message: Message):
     text = message.text.lower()
 
@@ -3992,11 +3990,54 @@ async def admin_call_detector(client, message: Message):
     )
 
 
-# ================== AUTO ABUSE FUNCTION ==================
+
+@app.on_message(filters.group & filters.text, group=2)
+async def admin_abuse_delete_handler(client, message: Message):
+
+    user = message.from_user
+    if not user or user.is_bot:
+        return
+
+    chat_id = message.chat.id
+    text = message.text.lower()
+
+    # ✅ Only admins
+    if not await is_any_admin(client, chat_id, user.id):
+        return
+
+    # ❌ No abuse word
+    if not ABUSE_REGEX.search(message.text):
+        return
+
+    # ===== DELETE MESSAGE =====
+    try:
+        await message.delete()
+    except:
+        pass  # bot may lack delete permission
+
+    # ===== ROLE =====
+    role = "Bot Admin" if user.id in INITIAL_ADMINS else "Admin 🛡"
+
+    warn_text = f"""
+⚠️ **ADMIN DISCIPLINE NOTICE**
+
+👤 **Admin:** {user.mention}
+🛡 **Role:** {role}
+
+🚫 Abusive message was **removed**
+📌 Discipline rules apply to **everyone**
+
+❗ Please maintain professional behavior
+"""
+
+    await message.chat.send_message(
+        warn_text,
+        disable_web_page_preview=True
+    )
 
 MUTE_TIME = 600  # 10 minutes
 
-@app.on_message(filters.group & filters.text & ~filters.me)
+@app.on_message(filters.group & filters.text, group=3)
 async def final_auto_abuse_handler(client, message):
     if not message.from_user:
         return
