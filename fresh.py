@@ -57,6 +57,7 @@ DELAY = 2              # seconds
 COOLDOWN = 120         # seconds
 
 PURGE_REPORT_DELETE_AFTER = 15  # seconds
+ADMIN_ABUSE_ENABLED = True
 
 # Multiple bot admins - ADD ALL YOUR ADMIN IDs HERE
 INITIAL_ADMINS = [
@@ -3370,6 +3371,25 @@ MY_ID_CARD_GROUP = """
 🕒 **Time:** {time}
 """
 
+ADMIN_ABUSE_CARD = """
+╔═══════════════════╗
+   ⚠️ 𝗔𝗗𝗠𝗜𝗡 𝗡𝗢𝗧𝗜𝗖𝗘
+╚═══════════════════╝
+
+👤 **Admin:** {admin}
+🛡 **Role:** {role}
+
+━━━━━━━━━━━━━━━━━━━
+🚫 **Abusive message removed**
+📌 Discipline rules apply to **everyone**
+
+🆔 **User ID:** `{user_id}`
+🆔 **Chat ID:** `{chat_id}`
+🕒 **Time:** {time}
+
+❗ Please maintain professional behavior
+"""
+
 def buttons():
     return InlineKeyboardMarkup(
         [[
@@ -3968,6 +3988,43 @@ ADMIN_KEYWORDS = [
     "help", "support", "mod", "moderator"
 ]
 
+
+
+@app.on_message(filters.command("adminabuse") & filters.group)
+async def admin_abuse_toggle(client, message: Message):
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # 🔐 Only owner or bot admin
+    if user_id not in INITIAL_ADMINS:
+        try:
+            m = await client.get_chat_member(chat_id, user_id)
+            if m.status != ChatMemberStatus.OWNER:
+                return await message.reply("❌ **Only owner can control this setting**")
+        except:
+            return
+
+    global ADMIN_ABUSE_ENABLED
+
+    if len(message.command) < 2:
+        return await message.reply("⚙️ Use: `/adminabuse on | off | status`")
+
+    arg = message.command[1].lower()
+
+    if arg == "on":
+        ADMIN_ABUSE_ENABLED = True
+        return await message.reply("✅ **Admin abuse system ENABLED**")
+
+    if arg == "off":
+        ADMIN_ABUSE_ENABLED = False
+        return await message.reply("🚫 **Admin abuse system DISABLED**")
+
+    if arg == "status":
+        status = "ON ✅" if ADMIN_ABUSE_ENABLED else "OFF 🚫"
+        return await message.reply(f"⚙️ **Admin abuse system:** {status}")
+
+
 @app.on_message(filters.group & filters.text, group=1)
 async def admin_call_detector(client, message: Message):
     text = message.text.lower()
@@ -3994,6 +4051,9 @@ async def admin_call_detector(client, message: Message):
 @app.on_message(filters.group & filters.text, group=2)
 async def admin_abuse_delete_handler(client, message: Message):
 
+    if not ADMIN_ABUSE_ENABLED:
+        return
+        
     user = message.from_user
     if not user or user.is_bot:
         return
@@ -4013,27 +4073,24 @@ async def admin_abuse_delete_handler(client, message: Message):
     try:
         await message.delete()
     except:
-        pass  # bot may lack delete permission
+        pass
 
-    # ===== ROLE =====
-    role = "Bot Admin" if user.id in INITIAL_ADMINS else "Admin 🛡"
+    role = "Bot Admin " if user.id in INITIAL_ADMINS else "Admin 🛡"
 
-    warn_text = f"""
-⚠️ **ADMIN DISCIPLINE NOTICE**
+    card = ADMIN_ABUSE_CARD.format(
+        admin=user.mention,
+        role=role,
+        user_id=user.id,
+        chat_id=chat_id,
+        time=datetime.now().strftime("%d %b %Y • %I:%M %p")
+    )
 
-👤 **Admin:** {user.mention}
-🛡 **Role:** {role}
-
-🚫 Abusive message was **removed**
-📌 Discipline rules apply to **everyone**
-
-❗ Please maintain professional behavior
-"""
-
-    await message.chat.send_message(
-        warn_text,
+    await client.send_message(
+        chat_id,
+        card,
         disable_web_page_preview=True
     )
+
 
 MUTE_TIME = 600  # 10 minutes
 
