@@ -1399,6 +1399,8 @@ async def pin_message(client, message: Message):
         await message.reply_text(f"❌ Pin failed\n`{e}`")
 
 
+
+
 @app.on_message(filters.command(["unpin", "bunpin"]) & filters.group)
 async def unpin_message(client, message: Message):
     chat_id = message.chat.id
@@ -1411,14 +1413,22 @@ async def unpin_message(client, message: Message):
     if not (is_bot_admin_user or can_pin):
         return await message.reply_text("❌ You don't have permission to unpin messages.")
 
-    # Bot permission
+    # Check bot admin + pin permission
     bot = await client.get_chat_member(chat_id, "me")
     if bot.status != ChatMemberStatus.ADMINISTRATOR or not bot.privileges.can_pin_messages:
         return await message.reply_text("❌ Make me admin with **Pin Messages** permission.")
 
     try:
+        chat = await client.get_chat(chat_id)
+
+        # 🔥 MOST IMPORTANT CHECK
+        if not chat.pinned_message:
+            return await message.reply_text("ℹ️ No pinned message found in this chat.")
+
         await client.unpin_chat_message(chat_id)
-        await message.reply_text("📌 **Message unpinned successfully!**")
+
+        await message.reply_text("📌 **Pinned message unpinned successfully!**")
+
     except Exception as e:
         await message.reply_text(f"❌ Unpin failed\n`{e}`")
 
