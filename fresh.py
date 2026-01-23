@@ -1360,6 +1360,74 @@ async def universal_kick(client, message: Message):
         )
 
 
+
+# ===== PERMISSION CHECK FUNCTIONS =====
+
+async def is_user_admin(client: Client, chat_id: int, user_id: int) -> bool:
+    """Check if user is admin in the group"""
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in [
+            ChatMemberStatus.ADMINISTRATOR, 
+            ChatMemberStatus.OWNER
+        ]
+    except Exception:
+        return False
+
+async def can_user_pin_messages(client: Client, chat_id: int, user_id: int) -> bool:
+    """Check if user has permission to pin messages"""
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        
+        # If user is owner, they can always pin
+        if member.status == ChatMemberStatus.OWNER:
+            return True
+        
+        # If user is admin, check their privileges
+        if member.status == ChatMemberStatus.ADMINISTRATOR:
+            return member.privileges.can_pin_messages if member.privileges else False
+        
+        return False
+    except Exception:
+        return False
+
+def bot_admin(user_id: int) -> bool:
+    """Check if user is the bot admin/owner"""
+    return user_id in INITIAL_ADMINS
+
+
+
+
+# Unpin specific message - requires bot admin OR group admin
+@app.on_message(filters.command(["unpin", "unpinmsg"]) & filters.group)
+async def unpin_message(client: Client, message: Message):
+    """Unpin a specific message with admin permission check"""
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        # ===== Permission check =====
+        is_bot_admin_user = bot_admin(user_id)
+        can_pin = await can_user_pin_messages(client, chat_id, user_id)
+        
+        if not (is_bot_admin_user or can_pin):
+            await message.reply("❌ **You don't have permission to unpin messages!**")
+            return
+        
+        if message.reply_to_message:
+            # Unpin the specific replied message
+            await client.unpin_chat_message(
+                chat_id=chat_id,
+                message_id=message.reply_to_message.id
+            )
+            await message.reply("✅ **Message unpinned successfully!**")
+        else:
+            await message.reply("❌ **Please reply to a pinned message to unpin it.**")
+            
+    except Exception as e:
+        await message.reply(f"❌ **Failed to unpin:** `{str(e)}`")
+
+
 # ================================= Pin System ========================
 @app.on_message(filters.command(["pin", "bpin"]) & filters.group)
 async def pin_message(client, message: Message):
