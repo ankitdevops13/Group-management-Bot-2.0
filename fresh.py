@@ -146,13 +146,14 @@ CREATE TABLE IF NOT EXISTS auto_reply_sent (
 # ================= ADMIN REPLY MODE ===================
 # (Inline support reply target)
 # ======================================================
+cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS abuse_warnings (user_id INTEGER PRIMARY KEY, count INTEGER)")
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
     user_id INTEGER
 )
 """)
-
 # ======================================================
 # ================= ABUSE / WARN SYSTEM ================
 # (GROUP-WISE — ACTIVE TABLE)
@@ -330,14 +331,6 @@ for admin_id in INITIAL_ADMINS:
 
 # ================= ABUSE WARNINGS TABLE =================
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS abuse_warnings (
-    chat_id INTEGER,
-    user_id INTEGER,
-    warns INTEGER DEFAULT 0,
-    PRIMARY KEY (chat_id, user_id)
-)
-""")
 cur.execute("""
 CREATE TABLE IF NOT EXISTS pm_abuse_warns (
     user_id INTEGER PRIMARY KEY,
@@ -525,7 +518,7 @@ def get_uptime() -> str:
       
 # ================= FIXED ABUSE WARNING FUNCTION =================
 # Remove the duplicate abuse_warning functions and use this unified version:
-def abuse_warning(chat_id, user_id):
+def abuse_warnings(chat_id, user_id):
     """Add abuse warning for user in chat"""
     cur.execute(
         "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
@@ -541,6 +534,14 @@ def abuse_warning(chat_id, user_id):
         (chat_id, user_id)
     )
     return cur.fetchone()[0]
+
+def abuse_warning(uid):
+    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
+    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    conn.commit()
+    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    return cur.fetchone()[0]
+    
 # ===================== helpers 
 def get_pm_warn(user_id):
     cur.execute(
@@ -7065,21 +7066,156 @@ def footer(text):
 🤖 {BOT_BRAND}
 ✨ {BOT_TAGLINE}
 ━━━━━━━━━━━━━━━━━━"""
+
+# ================= USER HANDLER =================
+@app.on_message(filters.private, group=1)
+async def user_handler(client, message: Message):
+    if message.from_user.is_bot:
+        return
+
+    uid = message.from_user.id
+
+    # ---------- ADMIN CHECK ----------
+    if is_admin(uid):
+        return
+
+    # ---------- BLOCK CHECK ----------
+    if is_blocked(uid):
+        await message.reply_text(
+            f"{beautiful_header('support')}\n\n"
+            "🔴 **Access Blocked**\n"
+            "Aap admin dwara block kiye gaye hain."
+            + beautiful_footer()
+        )
+        return
+
+    # ---------- ABUSE CHECK ----------
+    abuse_text = message.text or message.caption
+    if abuse_text and contains_abuse(abuse_text):
+        count = abuse_warning(uid)
+
+        if count >= 2:
+            cur.execute(
+                "INSERT OR IGNORE INTO blocked_users VALUES (?)",
+                (uid,)
+            )
+            conn.commit()
+
+            await message.reply_text(
+                f"{beautiful_header('support')}\n\n"
+                "🔴 **Blocked**\n"
+                "Repeated abusive language detected."
+                + beautiful_footer()
+            )
+            return
+        else:
+            await message.reply_text(
+                f"{beautiful_header('support')}\n\n"
+                "⚠️ **Warning**\n"
+                "Abusive language detected. Please behave."
+                + beautiful_footer()
+            )
+            return
+
+    # ---------- AUTO REPLY LOGIC ----------
+    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    first_time = not cur.fetchone()
+
+    if first_time:
+        await message.reply_text(
+            f"{beautiful_header('support')}\n\n"
+            "📨 **Message Received!**\n"
+            "Thanks for contacting us ✨\n"
+            "Our **Ankit Shakya** will reply shortly ⏳"
+            + beautiful_footer()
+        )
+        cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
+        conn.commit()
+    else:
+        await message.reply_text(
+            f"{beautiful_header('support')}\n\n"
+            "✅ **Message received**"
+            + beautiful_footer()
+        )
+
+    # ---------- FORWARD USER MESSAGE TO ADMINS ----------
+    cur.execute("SELECT admin_id FROM admins")
+    admins = cur.fetchall()
+
+    header = f"""
+{beautiful_header('support')}
+
+📩 **New User Message**
+
+👤 **Name:** {message.from_user.first_name}
+🆔 **ID:** `{uid}`
+📛 **Username:** @{message.from_user.username or 'None'}
+    """
+
+    for (aid,) in admins:
+        try:
+            if message.text:
+                await client.send_message(
+                    aid,
+                    f"{header}\n\n💬 **Message:** {message.text}",
+                    reply_markup=admin_buttons(uid)
+                )
+            else:
+                await message.copy(
+                    aid,
+                    caption=header,
+                    reply_markup=admin_buttons(uid)
+                )
+        except:
+            continue
+
+
+
+# ================= REPLY BUTTON =================
+@app.on_callback_query(filters.regex("^reply:"))
+async def cb_reply(client, cq):
+    if cq.from_user.is_bot:
+        return
+
+    admin_id = cq.from_user.id
+
+    if not is_admin(admin_id):
+        await cq.answer("Not allowed", show_alert=True)
+        return
+
+    try:
+        user_id = int(cq.data.split(":")[1])
+    except:
+        await cq.answer("Invalid target", show_alert=True)
+        return
+
+    cur.execute(
+        "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
+        (admin_id, user_id)
+    )
+    conn.commit()
+
+    await cq.message.reply_text(
+        f"{beautiful_header('support')}\n\n"
+        "✍️ **Reply Mode ON**\n\n"
+        "Ab aap apna message (text / photo / video / document / voice) bhejein.\n"
+        "Agla message **direct user ko** jayega ✅"
+        + beautiful_footer()
+    )
+
+    await cq.answer("Reply mode enabled ✅")
+
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
-
-@app.on_message(filters.private & filters.user(INITIAL_ADMINS), group=0)
+@app.on_message(filters.private, group=0)
 async def admin_reply_handler(client, message: Message):
-
-    if not message.from_user or message.from_user.is_bot:
+    if message.from_user.is_bot:
         return
 
     admin_id = message.from_user.id
 
-    # admin hi allowed
     if not is_admin(admin_id):
         return
 
-    # reply target check
     cur.execute(
         "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
         (admin_id,)
@@ -7087,25 +7223,29 @@ async def admin_reply_handler(client, message: Message):
     row = cur.fetchone()
 
     if not row:
-        return  # reply mode off
+        return
 
     user_id = row[0]
 
+    cur.execute(
+        "DELETE FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    conn.commit()
+
     try:
-        # ---------- SEND ----------
         if message.text:
             await client.send_message(
                 user_id,
                 f"{beautiful_header('support')}\n\n"
-                f"💌 {message.text}"
-                f"{beautiful_footer()}"
+                f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}"
+                + beautiful_footer()
             )
             mtype, content = "text", message.text
         else:
             await message.copy(user_id)
             mtype, content = "media", "MEDIA"
 
-        # ---------- SAVE HISTORY ----------
         cur.execute(
             """
             INSERT INTO contact_history
@@ -7116,117 +7256,19 @@ async def admin_reply_handler(client, message: Message):
         )
         conn.commit()
 
-        # ✅ NOW clear reply mode (AFTER success)
-        cur.execute(
-            "DELETE FROM admin_reply_target WHERE admin_id=?",
-            (admin_id,)
+        await message.reply_text(
+            f"{beautiful_header('support')}\n\n"
+            "✅ **Reply sent to user**"
+            + beautiful_footer()
         )
-        conn.commit()
-
-        await message.reply_text("✅ Reply sent to user")
 
     except Exception as e:
-        await message.reply_text(f"❌ Failed to send reply\n`{e}`")
-
-
-# ============================ USER HANDLER ============================
-@app.on_message(filters.private & ~filters.user(INITIAL_ADMINS), group=1)
-async def user_handler(client, message: Message):
-
-    if not message.from_user or message.from_user.is_bot:
-        return
-
-    uid = message.from_user.id
-
-    # ---------- BLOCK CHECK ----------
-    if is_blocked_user(uid):
         await message.reply_text(
-            "🔴 **Access Blocked**\n"
-            "Aap admin dwara block kiye gaye hain."
-            + beautiful_footer()
-        )
-        return
-
-    # ---------- ABUSE CHECK (PM SAFE) ----------
-    abuse_text = message.text or message.caption
-
-    if abuse_text and contains_abuse(abuse_text):
-
-        count = add_pm_warn(uid)
-
-        if count >= 2:
-            cur.execute(
-                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
-                (uid,)
-            )
-            conn.commit()
-
-            await message.reply_text(
-                "🔴 **Blocked**\nRepeated abusive language detected."
-                + beautiful_footer()
-            )
-            return
-
-        else:
-            await message.reply_text(
-                "⚠️ **Warning**\nAbusive language detected. Please behave."
-                + beautiful_footer()
-            )
-            return
-
-    # ---------- AUTO REPLY ----------
-    cur.execute(
-        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
-        (uid,)
-    )
-    first_time = not cur.fetchone()
-
-    if first_time:
-        await message.reply_text(
-            "📨 **Message Received!**\n"
-            "Thanks for contacting us ✨\n"
-            "Our **Ankit Shakya** will reply shortly ⏳"
-            + beautiful_footer()
-        )
-        cur.execute(
-            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
-            (uid,)
-        )
-        conn.commit()
-    else:
-        await message.reply_text(
-            "✅ **Message received**"
+            f"{beautiful_header('support')}\n\n"
+            f"❌ **Failed to send reply**\n`{e}`"
             + beautiful_footer()
         )
 
-    # ---------- FORWARD TO ADMINS ----------
-    cur.execute("SELECT admin_id FROM admins")
-    admins = cur.fetchall()
-
-    header = (
-        f"{beautiful_header('support')}\n\n"
-        "📩 **New User Message**\n\n"
-        f"👤 Name: {message.from_user.first_name}\n"
-        f"🆔 ID: `{uid}`\n"
-        f"👤 Username: @{message.from_user.username or 'None'}\n\n"
-    )
-
-    for (aid,) in admins:
-        try:
-            if message.text:
-                await client.send_message(
-                    aid,
-                    f"{header}💬 {message.text}",
-                    reply_markup=admin_button(uid)
-                )
-            else:
-                await message.copy(
-                    aid,
-                    caption=header,
-                    reply_markup=admin_button(uid)
-                )
-        except Exception:
-            continue
 
 
 @app.on_message(filters.group & filters.text, group=3)
@@ -7429,7 +7471,7 @@ async def check_mutes_task():
 def admin_button(uid):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🟢 Reply", callback_data=f"reply_{uid}"),
+            InlineKeyboardButton("🟢 Reply", callback_data=f"reply{uid}"),
             InlineKeyboardButton("🚫 Block", callback_data=f"block_{uid}")
         ],
         [
@@ -7438,6 +7480,19 @@ def admin_button(uid):
         ]
     ])
 
+@app.on_callback_query(filters.regex("^rules$"))
+async def rules_cb(client, cq):
+    await cq.answer()
+    await cq.message.reply_text(
+        f"{beautiful_header('settings')}\n\n"
+        "📜 **Support Rules**\n\n"
+        "✅ Respectful language ka use karein\n"
+        "❌ Abuse bilkul allowed nahi\n"
+        "🚫 Repeat violation par block\n"
+        "⏳ Thoda patience rakhein\n\n"
+        "🙏 Dhanyavaad"
+        + beautiful_footer()
+    )
 # ================= BLOCK / UNBLOCK / HISTORY =================
 
 @app.on_callback_query(filters.regex(r"^reply_(\d+)$"), group=0)
