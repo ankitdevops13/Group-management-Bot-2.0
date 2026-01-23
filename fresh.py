@@ -357,9 +357,11 @@ ON abuse_warnings(chat_id, user_id)
 # ======================================================
 conn.commit()
 
-# ================= INITIALIZE DATABASE TABLES =================
+# ================= INITIALIZE WITH SAMPLE DATA =================
 def init_broadcast_tables():
-    """Initialize broadcast related tables"""
+    """Initialize broadcast tables with sample data"""
+    
+    print("🔄 Setting up broadcast system...")
     
     # Users table
     cur.execute("""
@@ -400,11 +402,35 @@ def init_broadcast_tables():
     """)
     
     conn.commit()
-    print("✅ Broadcast system tables initialized!")
-
-# Call this function at bot startup
-init_broadcast_tables()
-
+    
+    # Add bot admins automatically
+    try:
+        print("👥 Adding bot admins to users table...")
+        
+        # Add SUPER_ADMIN
+        cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
+                   (SUPER_ADMIN, "Super Admin"))
+        
+        # Add other admins
+        for admin_id in INITIAL_ADMINS:
+            cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
+                       (admin_id, f"Admin {admin_id}"))
+        
+        conn.commit()
+        
+    except Exception as e:
+        print(f"⚠️ Could not add admins: {e}")
+    
+    # Count records
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    print(f"✅ Broadcast system ready!")
+    print(f"📊 Current data: {user_count} users, {group_count} groups")
+    
 
 # ================= INITIALIZE ADMINS FROM CONFIG =================
 def initialize_admins():
@@ -6447,79 +6473,6 @@ async def quick_add_users(client, message):
     
     await message.reply_text(f"✅ Added {added_count} users to database!\n\nNow use `/broadcast pm` to test.")
 
-# ================= INITIALIZE WITH SAMPLE DATA =================
-def init_broadcast_tables():
-    """Initialize broadcast tables with sample data"""
-    
-    print("🔄 Setting up broadcast system...")
-    
-    # Users table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
-            joined_date DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Groups table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS groups (
-            chat_id INTEGER PRIMARY KEY,
-            title TEXT,
-            username TEXT,
-            added_by INTEGER,
-            added_date DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Broadcast history table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS broadcast_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            admin_id INTEGER,
-            target TEXT,
-            message_type TEXT,
-            caption TEXT,
-            file_id TEXT,
-            sent_count INTEGER DEFAULT 0,
-            failed_count INTEGER DEFAULT 0,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    conn.commit()
-    
-    # Add bot admins automatically
-    try:
-        print("👥 Adding bot admins to users table...")
-        
-        # Add SUPER_ADMIN
-        cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
-                   (SUPER_ADMIN, "Super Admin"))
-        
-        # Add other admins
-        for admin_id in INITIAL_ADMINS:
-            cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
-                       (admin_id, f"Admin {admin_id}"))
-        
-        conn.commit()
-        
-    except Exception as e:
-        print(f"⚠️ Could not add admins: {e}")
-    
-    # Count records
-    cur.execute("SELECT COUNT(*) FROM users")
-    user_count = cur.fetchone()[0]
-    
-    cur.execute("SELECT COUNT(*) FROM groups")
-    group_count = cur.fetchone()[0]
-    
-    print(f"✅ Broadcast system ready!")
-    print(f"📊 Current data: {user_count} users, {group_count} groups")
 
 # ================= TEST BROADCAST COMMAND =================
 @app.on_message(filters.command("testbroadcast") & filters.private)
