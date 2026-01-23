@@ -674,6 +674,15 @@ def is_blocked_user(uid):
 def is_blocked(uid):
     cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
     return cur.fetchone() is not None
+
+def abuse_warnings(uid):
+    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
+    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    conn.commit()
+    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    return cur.fetchone()[0]
+
+
 async def is_group_admin(client, chat_id, user_id):
     """Check if user is group admin"""
     try:
@@ -7067,7 +7076,7 @@ async def user_handler(client, message: Message):
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warning(uid)
+        count = abuse_warnings(uid)
 
         if count >= 2:
             cur.execute(
