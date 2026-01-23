@@ -671,6 +671,9 @@ def is_blocked_user(uid):
     cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
     return cur.fetchone() is not None
 
+def is_blocked(uid):
+    cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
+    return cur.fetchone() is not None
 async def is_group_admin(client, chat_id, user_id):
     """Check if user is group admin"""
     try:
