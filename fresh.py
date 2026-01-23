@@ -357,6 +357,54 @@ ON abuse_warnings(chat_id, user_id)
 # ======================================================
 conn.commit()
 
+# ================= INITIALIZE DATABASE TABLES =================
+def init_broadcast_tables():
+    """Initialize broadcast related tables"""
+    
+    # Users table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
+            joined_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Groups table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            chat_id INTEGER PRIMARY KEY,
+            title TEXT,
+            username TEXT,
+            added_by INTEGER,
+            added_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Broadcast history table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS broadcast_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER,
+            target TEXT,
+            message_type TEXT,
+            caption TEXT,
+            file_id TEXT,
+            sent_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    conn.commit()
+    print("✅ Broadcast system tables initialized!")
+
+# Call this function at bot startup
+init_broadcast_tables()
+
 
 # ================= INITIALIZE ADMINS FROM CONFIG =================
 def initialize_admins():
@@ -5996,6 +6044,314 @@ async def bot_stats_callback(client, callback_query):
         reply_markup=buttons
     )
 
+# ================= BROADCAST SYSTEM =================
+@app.on_message(filters.command(["broadcast", "bc"]) & filters.private)
+async def broadcast_command(client, message):
+    """Broadcast message to all users/groups"""
+    
+    # Check if user is bot admin
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Only bot admins can use this command!")
+        return
+    
+    # Check if replied to a message
+    if not message.reply_to_message:
+        help_text = """
+📢 **BROADCAST COMMAND**
+
+**Usage:**
+1. Reply to any message (text/photo/video)
+2. Type `/broadcast [target]`
+
+**Targets:**
+• `all` - All users + groups
+• `pm` - PM users only
+• `groups` - Groups only
+• `support` - Support users only
+
+**Example:** Reply + `/broadcast all`
+        """
+        await message.reply_text(help_text)
+        return
+    
+    # Check target
+    if len(message.command) < 2:
+        await message.reply_text("❌ Please specify target: `/broadcast all` or `/broadcast pm` etc.")
+        return
+    
+    target = message.command[1].lower()
+    valid_targets = ["all", "pm", "groups", "support"]
+    
+    if target not in valid_targets:
+        await message.reply_text(f"❌ Invalid target! Use: {', '.join(valid_targets)}")
+        return
+    
+    # Get target name for display
+    target_names = {
+        "all": "All Users & Groups",
+        "pm": "PM Users Only",
+        "groups": "Groups Only",
+        "support": "Support Users Only"
+    }
+    
+    # Confirm broadcast
+    confirm_msg = await message.reply_text(
+        f"⚠️ **Confirm Broadcast**\n\n"
+        f"**Target:** {target_names[target]}\n"
+        f"**From:** {message.from_user.mention}\n"
+        f"**Message Type:** {'Media' if message.reply_to_message.media else 'Text'}\n\n"
+        f"Are you sure?",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Yes, Send", callback_data=f"bc_confirm:{target}"),
+                InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel")
+            ]
+        ])
+    )
+    
+    # Store message reference
+    await message.delete()
+
+@app.on_callback_query(filters.regex("^bc_confirm:"))
+async def broadcast_confirm(client, callback_query):
+    """Confirm and start broadcast"""
+    
+    target = callback_query.data.split(":")[1]
+    admin = callback_query.from_user
+    original_msg = callback_query.message.reply_to_message
+    
+    await callback_query.answer("Starting broadcast...")
+    
+    # Update status
+    status_msg = await callback_query.message.edit_text(
+        f"📤 **Broadcast Started**\n\n"
+        f"Target: {target}\n"
+        f"Collecting recipients..."
+    )
+    
+    # Get recipients
+    recipients = []
+    
+    if target == "all":
+        # Get all users and groups
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+        recipients.extend([uid[0] for uid in users])
+        
+        cur.execute("SELECT chat_id FROM groups")
+        groups = cur.fetchall()
+        recipients.extend([gid[0] for gid in groups])
+    
+    elif target == "pm":
+        # Get PM users only
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+        recipients.extend([uid[0] for uid in users])
+    
+    elif target == "groups":
+        # Get groups only
+        cur.execute("SELECT chat_id FROM groups")
+        groups = cur.fetchall()
+        recipients.extend([gid[0] for gid in groups])
+    
+    elif target == "support":
+        # Get support users
+        cur.execute("SELECT DISTINCT user_id FROM contact_history")
+        support_users = cur.fetchall()
+        recipients.extend([uid[0] for uid in support_users])
+    
+    # Remove duplicates and invalid IDs
+    recipients = list(set(recipients))
+    recipients = [rid for rid in recipients if rid and rid != (await client.get_me()).id]
+    
+    if not recipients:
+        await status_msg.edit_text("❌ No recipients found!")
+        return
+    
+    total = len(recipients)
+    sent = 0
+    failed = 0
+    
+    # Update with progress
+    await status_msg.edit_text(
+        f"📤 **Broadcasting...**\n\n"
+        f"Target: {target}\n"
+        f"Total: {total} recipients\n"
+        f"Progress: 0/{total}\n"
+        f"✅ Sent: 0\n"
+        f"❌ Failed: 0"
+    )
+    
+    # Send messages
+    for i, chat_id in enumerate(recipients):
+        try:
+            if original_msg.text:
+                await client.send_message(chat_id, original_msg.text)
+            elif original_msg.photo:
+                await client.send_photo(
+                    chat_id,
+                    original_msg.photo.file_id,
+                    caption=original_msg.caption
+                )
+            elif original_msg.video:
+                await client.send_video(
+                    chat_id,
+                    original_msg.video.file_id,
+                    caption=original_msg.caption
+                )
+            elif original_msg.document:
+                await client.send_document(
+                    chat_id,
+                    original_msg.document.file_id,
+                    caption=original_msg.caption
+                )
+            else:
+                # Try to copy any other message type
+                await original_msg.copy(chat_id)
+            
+            sent += 1
+            
+            # Update progress every 10 messages
+            if i % 10 == 0 or i == total - 1:
+                await status_msg.edit_text(
+                    f"📤 **Broadcasting...**\n\n"
+                    f"Target: {target}\n"
+                    f"Total: {total} recipients\n"
+                    f"Progress: {i+1}/{total}\n"
+                    f"✅ Sent: {sent}\n"
+                    f"❌ Failed: {failed}"
+                )
+            
+            # Small delay to avoid flood
+            await asyncio.sleep(0.05)
+            
+        except Exception as e:
+            failed += 1
+            print(f"Failed to send to {chat_id}: {e}")
+    
+    # Save to history
+    cur.execute("""
+        INSERT INTO broadcast_history 
+        (admin_id, target, sent_count, failed_count) 
+        VALUES (?, ?, ?, ?)
+    """, (admin.id, target, sent, failed))
+    conn.commit()
+    
+    # Send completion report
+    success_rate = (sent / total * 100) if total > 0 else 0
+    
+    completion_text = f"""
+✅ **Broadcast Completed**
+
+📊 **Statistics:**
+• Target: {target}
+• Total Recipients: {total}
+• Successfully Sent: {sent}
+• Failed: {failed}
+• Success Rate: {success_rate:.1f}%
+
+👤 **Admin:** {admin.mention}
+🕒 **Time:** {datetime.now().strftime('%I:%M %p')}
+    """
+    
+    await status_msg.edit_text(
+        completion_text,
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📋 History", callback_data="bc_history"),
+                InlineKeyboardButton("🔄 Send Again", callback_data="bc_again")
+            ]
+        ])
+    )
+
+@app.on_callback_query(filters.regex("^bc_history$"))
+async def broadcast_history(client, callback_query):
+    """Show broadcast history"""
+    
+    if not is_bot_admin(callback_query.from_user.id):
+        await callback_query.answer("Admin only!", show_alert=True)
+        return
+    
+    cur.execute("""
+        SELECT id, target, sent_count, failed_count, timestamp 
+        FROM broadcast_history 
+        ORDER BY id DESC 
+        LIMIT 10
+    """)
+    history = cur.fetchall()
+    
+    if not history:
+        await callback_query.message.edit_text("📭 No broadcast history found!")
+        return
+    
+    history_text = "📋 **Broadcast History**\n\n"
+    
+    for row in history:
+        broadcast_id, target, sent, failed, timestamp = row
+        total = sent + failed
+        success_rate = (sent / total * 100) if total > 0 else 0
+        
+        history_text += f"""
+**#{broadcast_id}** - {target}
+✅ {sent} | ❌ {failed} | 📊 {success_rate:.1f}%
+🕒 {timestamp}
+━━━━━━━━━━━━━━━━
+        """
+    
+    await callback_query.message.edit_text(
+        history_text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back", callback_data="bc_back")]
+        ])
+    )
+
+@app.on_callback_query(filters.regex("^bc_cancel$"))
+async def broadcast_cancel(client, callback_query):
+    """Cancel broadcast"""
+    await callback_query.message.edit_text("❌ Broadcast cancelled!")
+    await callback_query.answer()
+
+@app.on_callback_query(filters.regex("^bc_back$"))
+async def broadcast_back(client, callback_query):
+    """Go back to broadcast menu"""
+    await broadcast_command(client, callback_query.message)
+
+# ================= USER/GROUP TRACKING =================
+@app.on_message(filters.private & ~filters.command())
+async def track_user_activity(client, message):
+    """Track user activity in database"""
+    
+    if message.from_user.is_bot:
+        return
+    
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    last_name = message.from_user.last_name
+    
+    # Update or insert user
+    cur.execute("""
+        INSERT OR REPLACE INTO users 
+        (user_id, username, first_name, last_name, last_active) 
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (user_id, username, first_name, last_name))
+    conn.commit()
+
+@app.on_message(filters.group & filters.command("start"))
+async def track_group_activity(client, message):
+    """Track group when bot is added"""
+    
+    chat = message.chat
+    added_by = message.from_user.id
+    
+    # Insert or update group
+    cur.execute("""
+        INSERT OR REPLACE INTO groups 
+        (chat_id, title, username, added_by) 
+        VALUES (?, ?, ?, ?)
+    """, (chat.id, chat.title, chat.username, added_by))
+    conn.commit()
+
 
 @app.on_message(filters.command("adminabuse") & filters.group)
 async def admin_abuse_toggle(client, message: Message):
@@ -6622,6 +6978,7 @@ async def start_background_tasks():
 # ================== RUN ==================
 # ================= MAIN EXECUTION =================
 if __name__ == "__main__":
+    init_broadcast_tables()
     print("=" * 50)
     print(f"🤖 {BOT_BRAND}")
     print(f"✨ {BOT_TAGLINE}")
