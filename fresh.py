@@ -311,10 +311,6 @@ CREATE INDEX IF NOT EXISTS idx_admins
 ON admins(admin_id)
 """)
 
-cur.execute("""
-CREATE INDEX IF NOT EXISTS idx_abuse_warns
-ON abuse_warns(chat_id, user_id)
-""")
 
 cur.execute("""
 CREATE INDEX IF NOT EXISTS idx_reports
