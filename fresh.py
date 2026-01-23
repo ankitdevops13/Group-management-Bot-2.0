@@ -6317,7 +6317,7 @@ async def broadcast_back(client, callback_query):
     await broadcast_command(client, callback_query.message)
 
 # ================= USER/GROUP TRACKING =================
-@app.on_message(filters.private & ~filters.command())
+@app.on_message(filters.private & ~filters.command)
 async def track_user_activity(client, message):
     """Track user activity in database"""
     
