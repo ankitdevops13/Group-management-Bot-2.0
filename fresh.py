@@ -7162,7 +7162,71 @@ async def user_handler(client, message: Message):
         except:
             continue
 
+# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
+@app.on_message(filters.private, group=0)
+async def admin_reply_handler(client, message: Message):
 
+    # ❌ Bot ke apne messages ignore
+    if message.from_user.is_bot:
+        return
+
+    admin_id = message.from_user.id
+
+    # ❌ Agar admin nahi hai → ignore
+    if not is_admin(admin_id):
+        return
+
+    # ✅ Check: reply mode ON hai ya nahi
+    cur.execute(
+        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    row = cur.fetchone()
+
+    # ❌ Reply mode OFF → normal admin chat
+    if not row:
+        return
+
+    user_id = row[0]
+
+    # 🔴 IMPORTANT: pehle hi reply mode clear karo
+    # (warna loop / echo ban jata hai)
+    cur.execute(
+        "DELETE FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    conn.commit()
+
+    try:
+        # ---------- SEND MESSAGE ----------
+        if message.text:
+            # TEXT
+            await client.send_message(
+                user_id,
+                footer(f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}")
+            )
+            mtype, content = "text", message.text
+        else:
+            # ALL MEDIA (photo, video, doc, audio, voice, sticker, gif…)
+            await message.copy(user_id)
+            mtype, content = "media", "MEDIA"
+
+        # ---------- SAVE HISTORY ----------
+        cur.execute(
+            """
+            INSERT INTO contact_history
+            (user_id, sender, message_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, "admin", mtype, content)
+        )
+        conn.commit()
+
+        await message.reply_text("✅ Reply sent to user")
+
+    except Exception as e:
+        await message.reply_text(f"❌ Failed to send reply\n`{e}`")
+        
 
 # ================= REPLY BUTTON =================
 @app.on_callback_query(filters.regex("^reply:"))
@@ -7197,71 +7261,6 @@ async def cb_reply(client, cq):
     )
 
     await cq.answer("Reply mode enabled ✅")
-
-# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
-@app.on_message(filters.private, group=0)
-async def admin_reply_handler(client, message: Message):
-    if message.from_user.is_bot:
-        return
-
-    admin_id = message.from_user.id
-
-    if not is_admin(admin_id):
-        return
-
-    cur.execute(
-        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
-        (admin_id,)
-    )
-    row = cur.fetchone()
-
-    if not row:
-        return
-
-    user_id = row[0]
-
-    cur.execute(
-        "DELETE FROM admin_reply_target WHERE admin_id=?",
-        (admin_id,)
-    )
-    conn.commit()
-
-    try:
-        if message.text:
-            await client.send_message(
-                user_id,
-                f"{beautiful_header('support')}\n\n"
-                f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}"
-                + beautiful_footer()
-            )
-            mtype, content = "text", message.text
-        else:
-            await message.copy(user_id)
-            mtype, content = "media", "MEDIA"
-
-        cur.execute(
-            """
-            INSERT INTO contact_history
-            (user_id, sender, message_type, content)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, "admin", mtype, content)
-        )
-        conn.commit()
-
-        await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
-            "✅ **Reply sent to user**"
-            + beautiful_footer()
-        )
-
-    except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
-            f"❌ **Failed to send reply**\n`{e}`"
-            + beautiful_footer()
-        )
-
 
 
 @app.on_message(filters.group & filters.text, group=3)
