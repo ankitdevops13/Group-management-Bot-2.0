@@ -338,7 +338,12 @@ CREATE TABLE IF NOT EXISTS abuse_warnings (
     PRIMARY KEY (chat_id, user_id)
 )
 """)
-
+cur.execute("""
+CREATE TABLE IF NOT EXISTS pm_abuse_warns (
+    user_id INTEGER PRIMARY KEY,
+    warns INTEGER DEFAULT 0
+)
+""")
 # ================= INDEX (FAST LOOKUP) =================
 
 cur.execute("""
@@ -536,7 +541,28 @@ def abuse_warning(chat_id, user_id):
         (chat_id, user_id)
     )
     return cur.fetchone()[0]
+# ===================== helpers 
+def get_pm_warn(user_id):
+    cur.execute(
+        "SELECT warns FROM pm_abuse_warns WHERE user_id=?",
+        (user_id,)
+    )
+    row = cur.fetchone()
+    return row[0] if row else 0
 
+
+def add_pm_warn(user_id):
+    cur.execute(
+        "INSERT OR IGNORE INTO pm_abuse_warns (user_id, warns) VALUES (?, 0)",
+        (user_id,)
+    )
+    cur.execute(
+        "UPDATE pm_abuse_warns SET warns = warns + 1 WHERE user_id=?",
+        (user_id,)
+    )
+    conn.commit()
+    return get_pm_warn(user_id)
+    
 # ================= ADMIN TYPE CHECKING =================
 async def check_admin_type(client, chat_id, user_id):
     """
@@ -7120,26 +7146,26 @@ async def user_handler(client, message: Message):
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
 
-        count = abuse_warning(message.chat.id, uid)
+    count = add_pm_warn(uid)
 
-        if count >= 2:
-            cur.execute(
-                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
-                (uid,)
-            )
-            conn.commit()
+    if count >= 2:
+        cur.execute(
+            "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+            (uid,)
+        )
+        conn.commit()
 
-            await message.reply_text(
-                "🔴 **Blocked**\nRepeated abusive language detected."
-                + beautiful_footer()
-            )
-            return
-        else:
-            await message.reply_text(
-                "⚠️ **Warning**\nAbusive language detected. Please behave."
-                + beautiful_footer()
-            )
-            return
+        await message.reply_text(
+            "🔴 **Blocked**\nRepeated abusive language detected."
+            + beautiful_footer()
+        )
+        return
+    else:
+        await message.reply_text(
+            "⚠️ **Warning**\nAbusive language detected. Please behave."
+            + beautiful_footer()
+        )
+        return
 
     # ---------- AUTO REPLY ----------
     cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
