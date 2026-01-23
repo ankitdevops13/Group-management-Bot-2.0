@@ -7124,7 +7124,6 @@ async def admin_reply_handler(client, message: Message):
 
 
 # ============================ USER HANDLER ============================
-
 @app.on_message(filters.private & ~filters.user(INITIAL_ADMINS), group=1)
 async def user_handler(client, message: Message):
 
@@ -7142,33 +7141,38 @@ async def user_handler(client, message: Message):
         )
         return
 
-    # ---------- ABUSE CHECK ----------
+    # ---------- ABUSE CHECK (PM SAFE) ----------
     abuse_text = message.text or message.caption
+
     if abuse_text and contains_abuse(abuse_text):
 
-    count = add_pm_warn(uid)
+        count = add_pm_warn(uid)
 
-    if count >= 2:
-        cur.execute(
-            "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
-            (uid,)
-        )
-        conn.commit()
+        if count >= 2:
+            cur.execute(
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+                (uid,)
+            )
+            conn.commit()
 
-        await message.reply_text(
-            "🔴 **Blocked**\nRepeated abusive language detected."
-            + beautiful_footer()
-        )
-        return
-    else:
-        await message.reply_text(
-            "⚠️ **Warning**\nAbusive language detected. Please behave."
-            + beautiful_footer()
-        )
-        return
+            await message.reply_text(
+                "🔴 **Blocked**\nRepeated abusive language detected."
+                + beautiful_footer()
+            )
+            return
+
+        else:
+            await message.reply_text(
+                "⚠️ **Warning**\nAbusive language detected. Please behave."
+                + beautiful_footer()
+            )
+            return
 
     # ---------- AUTO REPLY ----------
-    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (uid,)
+    )
     first_time = not cur.fetchone()
 
     if first_time:
@@ -7215,9 +7219,8 @@ async def user_handler(client, message: Message):
                     caption=header,
                     reply_markup=admin_button(uid)
                 )
-        except:
+        except Exception:
             continue
-
 
 
 @app.on_message(filters.group & filters.text, group=3)
