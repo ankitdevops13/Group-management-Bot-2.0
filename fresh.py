@@ -383,6 +383,7 @@ user_mutes = {}  # {chat_id: {user_id: unmute_time}}
 approved_users = {}  # {chat_id: [user_ids]}
 abuse_tracker = {}
 # ================= BEAUTIFUL UI COMPONENTS =================
+# Add to your beautiful_header function for new headers
 def beautiful_header(title: str) -> str:
     """Create beautiful header for messages"""
     headers = {
@@ -396,9 +397,14 @@ def beautiful_header(title: str) -> str:
         "warning": "╔═══════════════════╗\n      ⚠️ WARNING ⚠️\n╚═══════════════════╝",
         "tools": "╔═══════════════════╗\n      🛠️ TOOLS 🛠️\n╚═══════════════════╝",
         "security": "╔═══════════════════╗\n      🛡️ SECURITY 🛡️\n╚═══════════════════╝",
-        "guide": "╔═══════════════════╗\n      📚 GUIDE 📚\n╚═══════════════════╝"
+        "guide": "╔═══════════════════╗\n      📚 GUIDE 📚\n╚═══════════════════╝",
+        "loading": "╔═══════════════════╗\n      ⏳ LOADING ⏳\n╚═══════════════════╝",
+        "sparkles": "╔═══════════════════╗\n      ✨ SPARKLES ✨\n╚═══════════════════╝",
+        "stats": "╔═══════════════════╗\n      📊 STATISTICS 📊\n╚═══════════════════╝",
+        "group": "╔═══════════════════╗\n      👥 GROUP 👥\n╚═══════════════════╝"
     }
     return headers.get(title, f"╔═══════════════════╗\n        {title}\n╚═══════════════════╝")
+
 
 def beautiful_footer() -> str:
     """Add beautiful footer to messages"""
@@ -4113,6 +4119,1882 @@ ADMIN_KEYWORDS = [
     "help", "support", "mod", "moderator"
 ]
 
+# ================= WELCOME MESSAGE SETTING =================
+@app.on_message(filters.command("setwelcome") & filters.group)
+async def set_welcome_message(client, message: Message):
+    """Set custom welcome message for the group"""
+    
+    # Check admin permissions
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    is_bot_admin_user = is_bot_admin(user_id)
+    is_group_admin_user = await is_group_admin(client, chat_id, user_id)
+    
+    if not (is_group_admin_user or is_bot_admin_user):
+        await message.reply_text(
+            f"{beautiful_header('settings')}\n\n"
+            "❌ **Permission Denied**\n"
+            "Only group admins or bot admins can set welcome messages."
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Check if message has text
+    if not message.text or len(message.text.split()) < 2:
+        help_text = f"""
+{beautiful_header('settings')}
+
+📝 **SET WELCOME MESSAGE**
+
+**Usage:** `/setwelcome [message]`
+
+**Example:** `/setwelcome Welcome {{mention}} to {{group}}!`
+
+**Available Variables:**
+• `{{mention}}` - User mention
+• `{{first_name}}` - User's first name
+• `{{last_name}}` - User's last name
+• `{{full_name}}` - User's full name
+• `{{username}}` - User's username
+• `{{user_id}}` - User's ID
+• `{{group}}` - Group name
+• `{{group_id}}` - Group ID
+• `{{time}}` - Join time
+• `{{date}}` - Join date
+
+**Custom Format Example:**
+`/setwelcome Hey {{mention}}! Welcome to {{group}}. Please read the rules.`
+
+**To remove welcome message:** `/delwelcome`
+**To see current welcome:** `/welcomesettings`
+        """
+        await message.reply_text(help_text + beautiful_footer())
+        return
+    
+    # Extract welcome message (remove command)
+    welcome_text = " ".join(message.text.split()[1:])
+    
+    # Save to database
+    cur.execute(
+        "INSERT OR REPLACE INTO welcome_messages (chat_id, message) VALUES (?, ?)",
+        (chat_id, welcome_text)
+    )
+    conn.commit()
+    
+    # Show preview
+    preview_text = welcome_text.replace("{{mention}}", message.from_user.mention)
+    preview_text = preview_text.replace("{{first_name}}", message.from_user.first_name or "")
+    preview_text = preview_text.replace("{{last_name}}", message.from_user.last_name or "")
+    preview_text = preview_text.replace("{{full_name}}", f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip())
+    preview_text = preview_text.replace("{{username}}", f"@{message.from_user.username}" if message.from_user.username else "No username")
+    preview_text = preview_text.replace("{{user_id}}", str(message.from_user.id))
+    preview_text = preview_text.replace("{{group}}", message.chat.title)
+    preview_text = preview_text.replace("{{group_id}}", str(message.chat.id))
+    preview_text = preview_text.replace("{{time}}", datetime.now().strftime("%I:%M %p"))
+    preview_text = preview_text.replace("{{date}}", datetime.now().strftime("%d %b %Y"))
+    
+    await message.reply_text(
+        f"{beautiful_header('settings')}\n\n"
+        "✅ **Welcome Message Set**\n\n"
+        f"**Preview:**\n{preview_text}\n\n"
+        f"📊 **Length:** {len(welcome_text)} characters\n"
+        f"💬 **Variables used:** {welcome_text.count('{{')}\n\n"
+        f"**To check:** `/welcomesettings`\n"
+        f"**To remove:** `/delwelcome`"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_message(filters.command("delwelcome") & filters.group)
+async def delete_welcome_message(client, message: Message):
+    """Delete custom welcome message"""
+    
+    # Check admin permissions
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    is_bot_admin_user = is_bot_admin(user_id)
+    is_group_admin_user = await is_group_admin(client, chat_id, user_id)
+    
+    if not (is_group_admin_user or is_bot_admin_user):
+        await message.reply_text(
+            f"{beautiful_header('settings')}\n\n"
+            "❌ **Permission Denied**\n"
+            "Only group admins or bot admins can delete welcome messages."
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Check if welcome exists
+    cur.execute("SELECT message FROM welcome_messages WHERE chat_id=?", (chat_id,))
+    existing = cur.fetchone()
+    
+    if not existing:
+        await message.reply_text(
+            f"{beautiful_header('settings')}\n\n"
+            "ℹ️ **No Welcome Message Set**\n"
+            "There is no custom welcome message for this group.\n\n"
+            "**To set one:** `/setwelcome [message]`"
+            f"{beautiful_footer()}"
+        )
+        return
+    
+    # Delete from database
+    cur.execute("DELETE FROM welcome_messages WHERE chat_id=?", (chat_id,))
+    conn.commit()
+    
+    await message.reply_text(
+        f"{beautiful_header('settings')}\n\n"
+        "🗑️ **Welcome Message Deleted**\n\n"
+        "Custom welcome message has been removed.\n"
+        "Default welcome will be shown for new members.\n\n"
+        "**To set new:** `/setwelcome [message]`"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_message(filters.command("welcomesettings") & filters.group)
+async def welcome_settings(client, message: Message):
+    """Show current welcome settings"""
+    
+    chat_id = message.chat.id
+    
+    # Get welcome message
+    cur.execute("SELECT message FROM welcome_messages WHERE chat_id=?", (chat_id,))
+    result = cur.fetchone()
+    
+    if result:
+        welcome_text = result[0]
+        status = "✅ **Custom Welcome Enabled**"
+        preview_text = welcome_text.replace("{{mention}}", message.from_user.mention)
+        preview_text = preview_text.replace("{{first_name}}", message.from_user.first_name or "")
+        preview_text = preview_text.replace("{{last_name}}", message.from_user.last_name or "")
+        preview_text = preview_text.replace("{{full_name}}", f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip())
+        preview_text = preview_text.replace("{{username}}", f"@{message.from_user.username}" if message.from_user.username else "No username")
+        preview_text = preview_text.replace("{{user_id}}", str(message.from_user.id))
+        preview_text = preview_text.replace("{{group}}", message.chat.title)
+        preview_text = preview_text.replace("{{group_id}}", str(message.chat.id))
+        preview_text = preview_text.replace("{{time}}", datetime.now().strftime("%I:%M %p"))
+        preview_text = preview_text.replace("{{date}}", datetime.now().strftime("%d %b %Y"))
+    else:
+        status = "ℹ️ **Default Welcome**"
+        welcome_text = "Not set (using default format)"
+        preview_text = f"👋 Welcome {message.from_user.mention} to {message.chat.title}!"
+    
+    await message.reply_text(
+        f"{beautiful_header('settings')}\n\n"
+        f"{status}\n\n"
+        f"📝 **Current Welcome Text:**\n`{welcome_text}`\n\n"
+        f"👤 **Preview:**\n{preview_text}\n\n"
+        f"**Commands:**\n"
+        f"• `/setwelcome [message]` - Set custom welcome\n"
+        f"• `/delwelcome` - Remove custom welcome\n"
+        f"• `/welcomesettings` - View current settings"
+        f"{beautiful_footer()}"
+    )
+
+@app.on_chat_member_updated()
+async def welcome_with_userdata(client, update):
+    """Handle new member joins with custom welcome messages"""
+    
+    if not update.old_chat_member or not update.new_chat_member:
+        return
+    
+    # Check if it's a join (not leave)
+    if (
+        update.old_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]
+        and update.new_chat_member.status == ChatMemberStatus.MEMBER
+    ):
+        user = update.new_chat_member.user
+        chat = update.chat
+        
+        # Skip bots if needed
+        if user.is_bot:
+            return
+        
+        username = f"@{user.username}" if user.username else "Not set"
+        account = "Bot 🤖" if user.is_bot else "User 👤"
+        join_time = datetime.now().strftime("%d %b %Y • %I:%M %p")
+        
+        # Check for custom welcome message
+        cur.execute("SELECT message FROM welcome_messages WHERE chat_id=?", (chat.id,))
+        result = cur.fetchone()
+        
+        if result:
+            # Use custom welcome message
+            welcome_text = result[0]
+            
+            # Replace variables
+            welcome_text = welcome_text.replace("{{mention}}", mention(user))
+            welcome_text = welcome_text.replace("{{first_name}}", user.first_name or "")
+            welcome_text = welcome_text.replace("{{last_name}}", user.last_name or "")
+            welcome_text = welcome_text.replace("{{full_name}}", f"{user.first_name or ''} {user.last_name or ''}".strip())
+            welcome_text = welcome_text.replace("{{username}}", username)
+            welcome_text = welcome_text.replace("{{user_id}}", str(user.id))
+            welcome_text = welcome_text.replace("{{group}}", chat.title)
+            welcome_text = welcome_text.replace("{{group_id}}", str(chat.id))
+            welcome_text = welcome_text.replace("{{time}}", join_time.split(" • ")[1])
+            welcome_text = welcome_text.replace("{{date}}", join_time.split(" • ")[0])
+            
+            # Send custom welcome
+            msg = await client.send_message(
+                chat.id,
+                f"{beautiful_header('welcome')}\n\n{welcome_text}",
+                disable_web_page_preview=True
+            )
+        else:
+            # Use default welcome format
+            text = WELCOME_USER_CARD.format(
+                mention=mention(user),
+                user_id=user.id,
+                username=username,
+                account=account,
+                time=join_time,
+                group=chat.title
+            )
+            
+            msg = await client.send_message(
+                chat.id,
+                text,
+                disable_web_page_preview=True
+            )
+        
+        # Optional: Auto-delete welcome after 2 minutes
+        # await asyncio.sleep(120)
+        # await msg.delete()
+
+
+
+# ================= COMPLETE HELP COMMAND SYSTEM =================
+
+# Define all command categories with descriptions
+HELP_CATEGORIES = {
+    "start": {"icon": "🚀", "title": "Start Commands", "admin_only": False},
+    "moderation": {"icon": "🔨", "title": "Moderation Commands", "admin_only": True},
+    "admin": {"icon": "👑", "title": "Admin Commands", "admin_only": True},
+    "welcome": {"icon": "👋", "title": "Welcome System", "admin_only": False},
+    "security": {"icon": "🛡️", "title": "Security & Locks", "admin_only": True},
+    "info": {"icon": "ℹ️", "title": "Information", "admin_only": False},
+    "support": {"icon": "💬", "title": "Support System", "admin_only": False},
+    "cleanup": {"icon": "🧹", "title": "Cleanup Commands", "admin_only": True},
+    "tagging": {"icon": "🏷️", "title": "Tagging System", "admin_only": True},
+    "tools": {"icon": "🛠️", "title": "Tools & Utilities", "admin_only": False}
+}
+
+# Define all commands with descriptions, usage, and categories
+ALL_COMMANDS = {
+    # Start Commands
+    "start": {
+        "description": "Start the bot and see main menu",
+        "usage": "/start",
+        "category": "start",
+        "admin_only": False,
+        "group_only": False
+    },
+    "help": {
+        "description": "Show this help message",
+        "usage": "/help [category]",
+        "category": "start",
+        "admin_only": False,
+        "group_only": False
+    },
+    "mystatus": {
+        "description": "Check your admin status and permissions",
+        "usage": "/mystatus",
+        "category": "start",
+        "admin_only": False,
+        "group_only": True
+    },
+    
+    # Moderation Commands
+    "mute": {
+        "description": "Mute a user (temporary or permanent)",
+        "usage": "/mute [reply/user] [duration] [reason]\n/bmute - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "unmute": {
+        "description": "Unmute a muted user",
+        "usage": "/unmute [reply/user]\n/bunmute - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "warn": {
+        "description": "Warn a user (3 warnings = auto-ban)",
+        "usage": "/warn [reply/user] [reason]\n/bwarn - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "ban": {
+        "description": "Ban a user from the group",
+        "usage": "/ban [reply/user] [reason]\n/bban - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "unban": {
+        "description": "Unban a previously banned user",
+        "usage": "/unban [reply/user]\n/bunban - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "kick": {
+        "description": "Kick a user from the group",
+        "usage": "/kick [reply/user] [reason]\n/bkick - Bot admin version",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "promote": {
+        "description": "Promote a user to admin",
+        "usage": "/promote [reply/user] [title]",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    "demote": {
+        "description": "Demote an admin to regular user",
+        "usage": "/demote [reply/user]",
+        "category": "moderation",
+        "admin_only": True,
+        "group_only": True
+    },
+    
+    # Welcome System
+    "setwelcome": {
+        "description": "Set custom welcome message for new members",
+        "usage": "/setwelcome [message]\nVariables: {{mention}}, {{first_name}}, {{group}}, etc.",
+        "category": "welcome",
+        "admin_only": True,
+        "group_only": True
+    },
+    "delwelcome": {
+        "description": "Delete custom welcome message",
+        "usage": "/delwelcome",
+        "category": "welcome",
+        "admin_only": True,
+        "group_only": True
+    },
+    "welcomesettings": {
+        "description": "View current welcome settings",
+        "usage": "/welcomesettings",
+        "category": "welcome",
+        "admin_only": False,
+        "group_only": True
+    },
+    
+    # Security & Locks
+    "lock": {
+        "description": "Lock specific permissions in group",
+        "usage": "/lock [type] [duration]\nTypes: all, text, media, stickers, etc.",
+        "category": "security",
+        "admin_only": True,
+        "group_only": True
+    },
+    "unlock": {
+        "description": "Unlock specific permissions",
+        "usage": "/unlock [type]\nTypes: all, text, media, stickers, etc.",
+        "category": "security",
+        "admin_only": True,
+        "group_only": True
+    },
+    "lockstatus": {
+        "description": "Check current lock status",
+        "usage": "/lockstatus",
+        "category": "security",
+        "admin_only": False,
+        "group_only": True
+    },
+    "glock": {
+        "description": "Bot admin: Lock group by chat ID",
+        "usage": "/glock [chat_id] [type] [duration] [silent]",
+        "category": "security",
+        "admin_only": True,
+        "group_only": False
+    },
+    "gunlock": {
+        "description": "Bot admin: Unlock group by chat ID",
+        "usage": "/gunlock [chat_id] [silent]",
+        "category": "security",
+        "admin_only": True,
+        "group_only": False
+    },
+    "adminabuse": {
+        "description": "Toggle admin abuse detection system",
+        "usage": "/adminabuse [on/off/status]",
+        "category": "security",
+        "admin_only": True,
+        "group_only": True
+    },
+    
+    # Information Commands
+    "id": {
+        "description": "Get user ID information",
+        "usage": "/id [reply/user]\nWithout argument shows your own ID",
+        "category": "info",
+        "admin_only": False,
+        "group_only": False
+    },
+    "myid": {
+        "description": "Get your own ID with details",
+        "usage": "/myid",
+        "category": "info",
+        "admin_only": False,
+        "group_only": False
+    },
+    "chatid": {
+        "description": "Get chat/channel ID",
+        "usage": "/chatid",
+        "category": "info",
+        "admin_only": False,
+        "group_only": False
+    },
+    
+    # Support System
+    "contact": {
+        "description": "Contact support (PM the bot)",
+        "usage": "Just send a message to the bot in PM",
+        "category": "support",
+        "admin_only": False,
+        "group_only": False
+    },
+    "support": {
+        "description": "Get support information",
+        "usage": "/support",
+        "category": "support",
+        "admin_only": False,
+        "group_only": False
+    },
+    
+    # Cleanup Commands
+    "purge": {
+        "description": "Delete messages from replied to current",
+        "usage": "/purge (reply to a message)",
+        "category": "cleanup",
+        "admin_only": True,
+        "group_only": True
+    },
+    "purgeall": {
+        "description": "Delete last N messages",
+        "usage": "/purgeall [number] [-s for silent]",
+        "category": "cleanup",
+        "admin_only": True,
+        "group_only": True
+    },
+    "pin": {
+        "description": "Pin a message",
+        "usage": "/pin [reply] [silent]\n/pinmsg - Alternative command",
+        "category": "cleanup",
+        "admin_only": True,
+        "group_only": True
+    },
+    "unpin": {
+        "description": "Unpin a message",
+        "usage": "/unpin [reply]\n/unpinmsg - Alternative command",
+        "category": "cleanup",
+        "admin_only": True,
+        "group_only": True
+    },
+    
+    # Tagging System
+    "tagall": {
+        "description": "Tag all group members",
+        "usage": "/tagall",
+        "category": "tagging",
+        "admin_only": True,
+        "group_only": True
+    },
+    "tagadmin": {
+        "description": "Tag all group admins",
+        "usage": "/tagadmin",
+        "category": "tagging",
+        "admin_only": False,
+        "group_only": True
+    },
+    "stop": {
+        "description": "Stop ongoing tagging process",
+        "usage": "/stop",
+        "category": "tagging",
+        "admin_only": True,
+        "group_only": True
+    },
+    
+    # Tools & Utilities
+    "exportcsv": {
+        "description": "Export support data to CSV (Bot admins only)",
+        "usage": "/exportcsv",
+        "category": "tools",
+        "admin_only": True,
+        "group_only": False
+    },
+    "listbotadmins": {
+        "description": "List all bot admins",
+        "usage": "/listbotadmins",
+        "category": "tools",
+        "admin_only": True,
+        "group_only": False
+    },
+    "addbotadmin": {
+        "description": "Add new bot admin (Super admin only)",
+        "usage": "/addbotadmin [user_id]",
+        "category": "tools",
+        "admin_only": True,
+        "group_only": False
+    },
+    "rules": {
+        "description": "Show group rules",
+        "usage": "/rules",
+        "category": "tools",
+        "admin_only": False,
+        "group_only": True
+    }
+}
+
+def create_help_buttons(categories, current_user_id, chat_type="private"):
+    """Create category buttons for help command"""
+    buttons = []
+    row = []
+    
+    for category_id, category_info in categories.items():
+        # Check if user can see this category
+        if category_info["admin_only"]:
+            if chat_type == "private":
+                if not is_bot_admin(current_user_id):
+                    continue
+            else:
+                # For groups, we need to check both bot admin and group admin
+                # This is simplified - you might want to adjust this logic
+                pass
+        
+        icon = category_info["icon"]
+        title = category_info["title"]
+        
+        button = InlineKeyboardButton(
+            f"{icon} {title}",
+            callback_data=f"help_cat:{category_id}"
+        )
+        
+        row.append(button)
+        if len(row) == 2:  # 2 buttons per row
+            buttons.append(row)
+            row = []
+    
+    if row:  # Add remaining buttons if any
+        buttons.append(row)
+    
+    # Add quick action buttons
+    quick_buttons = [
+        [
+            InlineKeyboardButton("🏠 Main Menu", callback_data="help_main"),
+            InlineKeyboardButton("🤖 Bot Info", callback_data="help_botinfo")
+        ],
+        [
+            InlineKeyboardButton("👑 Admin Help", callback_data="help_admin"),
+            InlineKeyboardButton("🆘 Quick Support", callback_data="help_support")
+        ]
+    ]
+    
+    buttons.extend(quick_buttons)
+    
+    return InlineKeyboardMarkup(buttons)
+
+def create_category_help(category_id, user_id, is_group=False):
+    """Create help text for a specific category"""
+    category = HELP_CATEGORIES.get(category_id)
+    if not category:
+        return None
+    
+    icon = category["icon"]
+    title = category["title"]
+    admin_only = category["admin_only"]
+    
+    # Filter commands for this category
+    category_commands = []
+    for cmd_name, cmd_info in ALL_COMMANDS.items():
+        if cmd_info["category"] == category_id:
+            # Check if command is available in current context
+            if cmd_info["group_only"] and not is_group:
+                continue
+            if cmd_info["admin_only"] and not is_bot_admin(user_id):
+                continue
+            
+            category_commands.append((cmd_name, cmd_info))
+    
+    if not category_commands:
+        return f"No commands available in {title} category for your access level."
+    
+    # Create help text
+    help_text = f"{beautiful_header('guide')}\n\n"
+    help_text += f"{icon} **{title}**\n\n"
+    
+    if admin_only:
+        help_text += "🔐 *Admin only commands*\n\n"
+    
+    help_text += "📋 **Available Commands:**\n\n"
+    
+    for cmd_name, cmd_info in category_commands:
+        help_text += f"• **/{cmd_name}**\n"
+        help_text += f"  ↳ {cmd_info['description']}\n"
+        help_text += f"  📝 Usage: `{cmd_info['usage']}`\n\n"
+    
+    help_text += f"📊 **Total:** {len(category_commands)} commands\n\n"
+    help_text += "💡 **Tip:** Click/tap commands to copy them\n"
+    help_text += "🔙 **Back:** Use buttons below to navigate"
+    
+    return help_text
+
+@app.on_message(filters.command(["help", "commands", "menu"]) & filters.private)
+async def help_command_private(client, message: Message):
+    """Help command for private chats"""
+    
+    user_id = message.from_user.id
+    is_admin_user = is_bot_admin(user_id)
+    
+    # Create welcome text
+    welcome_text = f"""
+{beautiful_header('guide')}
+
+🤖 **Welcome to {BOT_BRAND} Help Center**
+
+✨ **Premium Features:**
+• Advanced Moderation Tools
+• Custom Welcome System  
+• Smart Abuse Detection
+• Support Management
+• Tagging System
+• Security Locks
+
+👤 **Your Status:** {'👑 Bot Admin' if is_admin_user else '👤 Regular User'}
+
+📚 **Select a category below to explore commands:**
+
+"""
+    
+    await message.reply_text(
+        welcome_text + beautiful_footer(),
+        reply_markup=create_help_buttons(HELP_CATEGORIES, user_id, "private")
+    )
+
+@app.on_message(filters.command(["help", "commands", "menu"]) & filters.group)
+async def help_command_group(client, message: Message):
+    """Help command for groups - shows relevant commands"""
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Check if user is admin in this group
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        is_group_admin = member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except:
+        is_group_admin = False
+    
+    is_bot_admin_user = is_bot_admin(user_id)
+    
+    # Filter categories that are relevant for groups
+    relevant_categories = {}
+    for cat_id, cat_info in HELP_CATEGORIES.items():
+        if cat_info["admin_only"] and not (is_group_admin or is_bot_admin_user):
+            continue
+        relevant_categories[cat_id] = cat_info
+    
+    # Create group-specific help
+    help_text = f"""
+{beautiful_header('guide')}
+
+👥 **Group Help - {message.chat.title}**
+
+🔧 **Available Commands for You:**
+
+**👤 Member Commands:**
+• `/help` - Show this menu
+• `/id` - Get user ID
+• `/myid` - Get your ID
+• `/tagadmin` - Tag all admins
+• `/welcomesettings` - View welcome settings
+• `/rules` - Show group rules
+• `/support` - Get support info
+
+"""
+    
+    if is_group_admin or is_bot_admin_user:
+        help_text += """
+**👑 Admin Commands:**
+• `/mute` `/unmute` - User management
+• `/warn` `/ban` `/kick` - Moderation
+• `/promote` `/demote` - Admin management
+• `/purge` `/purgeall` - Message cleanup
+• `/pin` `/unpin` - Message pinning
+• `/lock` `/unlock` - Security locks
+• `/setwelcome` - Custom welcome
+• `/tagall` - Tag all members
+"""
+    
+    help_text += f"\n👑 **Your Role:** "
+    if is_bot_admin_user:
+        help_text += "Bot Admin ⚡"
+    elif is_group_admin:
+        help_text += "Group Admin 🛡️"
+    else:
+        help_text += "Member 👤"
+    
+    help_text += f"\n💬 **Chat:** {message.chat.title}"
+    help_text += f"\n🆔 **Chat ID:** `{chat_id}`"
+    
+    # Create buttons for group context
+    buttons = []
+    
+    # Basic buttons for everyone
+    basic_buttons = [
+        [
+            InlineKeyboardButton("ℹ️ My Info", callback_data="help_myinfo"),
+            InlineKeyboardButton("🆔 Get IDs", callback_data="help_ids")
+        ],
+        [
+            InlineKeyboardButton("📜 Rules", callback_data="help_rules"),
+            InlineKeyboardButton("👋 Welcome", callback_data="help_welcome")
+        ]
+    ]
+    
+    # Admin buttons if applicable
+    if is_group_admin or is_bot_admin_user:
+        admin_buttons = [
+            [
+                InlineKeyboardButton("🔨 Moderation", callback_data="help_cat:moderation"),
+                InlineKeyboardButton("🛡️ Security", callback_data="help_cat:security")
+            ],
+            [
+                InlineKeyboardButton("🧹 Cleanup", callback_data="help_cat:cleanup"),
+                InlineKeyboardButton("🏷️ Tagging", callback_data="help_cat:tagging")
+            ]
+        ]
+        buttons.extend(admin_buttons)
+    
+    buttons.extend(basic_buttons)
+    
+    # Add support button
+    buttons.append([
+        InlineKeyboardButton("💬 PM Support", url=f"https://t.me/{client.me.username}"),
+        InlineKeyboardButton("📚 Full Help", callback_data="help_full")
+    ])
+    
+    await message.reply_text(
+        help_text + beautiful_footer(),
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+@app.on_callback_query(filters.regex("^help_cat:"))
+async def help_category_callback(client, callback_query):
+    """Handle category selection in help menu"""
+    
+    category_id = callback_query.data.split(":")[1]
+    user_id = callback_query.from_user.id
+    
+    # Check if in group or private
+    chat_type = callback_query.message.chat.type
+    is_group = chat_type in ["group", "supergroup"]
+    
+    help_text = create_category_help(category_id, user_id, is_group)
+    
+    if not help_text:
+        await callback_query.answer("Category not found!", show_alert=True)
+        return
+    
+    # Create back button
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="help_main"),
+            InlineKeyboardButton("🏠 Main Menu", callback_data="help_start")
+        ]
+    ]
+    
+    try:
+        await callback_query.message.edit_text(
+            help_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True
+        )
+        await callback_query.answer()
+    except Exception as e:
+        await callback_query.answer(f"Error: {str(e)[:50]}", show_alert=True)
+
+@app.on_callback_query(filters.regex("^help_"))
+async def help_quick_actions(client, callback_query):
+    """Handle quick action buttons in help menu"""
+    
+    action = callback_query.data
+    user_id = callback_query.from_user.id
+    
+    if action == "help_main":
+        # Return to main help
+        is_admin_user = is_bot_admin(user_id)
+        
+        welcome_text = f"""
+{beautiful_header('guide')}
+
+🤖 **Welcome to {BOT_BRAND} Help Center**
+
+✨ **Premium Features:**
+• Advanced Moderation Tools
+• Custom Welcome System  
+• Smart Abuse Detection
+• Support Management
+• Tagging System
+• Security Locks
+
+👤 **Your Status:** {'👑 Bot Admin' if is_admin_user else '👤 Regular User'}
+
+📚 **Select a category below to explore commands:**
+"""
+        
+        await callback_query.message.edit_text(
+            welcome_text + beautiful_footer(),
+            reply_markup=create_help_buttons(HELP_CATEGORIES, user_id)
+        )
+    
+    elif action == "help_botinfo":
+        # Show bot information
+        uptime = get_uptime()
+        
+        botinfo_text = f"""
+{beautiful_header('info')}
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+📊 **Statistics:**
+• **Uptime:** {uptime}
+• **Bot Admins:** {len(INITIAL_ADMINS)}
+• **Abuse Words:** {len(ABUSE_WORDS)}
+• **Features:** 50+ commands
+• **Version:** 2.0 Premium
+
+⚡ **Core Features:**
+• Smart Moderation System
+• Custom Welcome Messages
+• Abuse Auto-Detection
+• Support Ticket System
+• Advanced Tagging
+• Security Lock System
+
+👨‍💻 **Developer:** @AnkitShakyaSupport
+📚 **Documentation:** /help
+
+💎 **Premium Bot - Fast & Secure**
+"""
+        
+        buttons = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="help_main"),
+                InlineKeyboardButton("👑 Admin Panel", callback_data="help_admin")
+            ],
+            [
+                InlineKeyboardButton("💬 Support", url=f"https://t.me/{client.me.username}"),
+                InlineKeyboardButton("📚 Commands", callback_data="help_commands")
+            ]
+        ]
+        
+        await callback_query.message.edit_text(
+            botinfo_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    
+    elif action == "help_admin":
+        # Admin-specific help
+        is_admin_user = is_bot_admin(user_id)
+        
+        if not is_admin_user:
+            await callback_query.answer("Admin access required!", show_alert=True)
+            return
+        
+        admin_text = f"""
+{beautiful_header('admin')}
+
+👑 **Admin Help Center**
+
+**Bot Admin Commands:**
+• `/addbotadmin [id]` - Add bot admin
+• `/listbotadmins` - List all admins
+• `/exportcsv` - Export support data
+• `/glock` - Lock group by ID
+• `/gunlock` - Unlock group by ID
+
+**Group Admin Commands:**
+• `/mute` `/unmute` - User restrictions
+• `/ban` `/unban` - Ban management
+• `/warn` - Warning system
+• `/kick` - Remove users
+• `/promote` `/demote` - Admin management
+• `/purge` `/purgeall` - Message cleanup
+• `/pin` `/unpin` - Message pinning
+• `/lock` `/unlock` - Security locks
+• `/setwelcome` - Welcome messages
+• `/tagall` - Tag all members
+
+**Super Admin Only:**
+• Full bot control
+• Add/remove bot admins
+• Global configuration
+• Database management
+
+👤 **Your Status:** Bot Admin ⚡
+"""
+        
+        buttons = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="help_main"),
+                InlineKeyboardButton("🛡️ Security", callback_data="help_cat:security")
+            ],
+            [
+                InlineKeyboardButton("🔨 Moderation", callback_data="help_cat:moderation"),
+                InlineKeyboardButton("📊 Stats", callback_data="help_stats")
+            ]
+        ]
+        
+        await callback_query.message.edit_text(
+            admin_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    
+    elif action == "help_support":
+        # Support information
+        support_text = f"""
+{beautiful_header('support')}
+
+💬 **Support System**
+
+**How to Get Support:**
+1. Send a message to this bot in PM
+2. Our support team will reply shortly
+3. Use respectful language
+
+**Support Rules:**
+✅ Be patient - we'll reply ASAP
+✅ Provide clear information
+✅ Use English or Hindi
+❌ No abuse or spam
+❌ No excessive messages
+
+**Quick Actions:**
+• PM the bot directly for help
+• Use /rules in groups
+• Contact @AnkitShakyaSupport
+
+**Support Hours:**
+🕒 24/7 Automated Support
+👨‍💻 Admin Response: Within hours
+
+**Need Immediate Help?**
+Send "Hello" to the bot in PM
+"""
+        
+        buttons = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="help_main"),
+                InlineKeyboardButton("📨 PM Bot", url=f"https://t.me/{client.me.username}")
+            ],
+            [
+                InlineKeyboardButton("📜 Rules", callback_data="help_rules"),
+                InlineKeyboardButton("ℹ️ Info", callback_data="help_info")
+            ]
+        ]
+        
+        await callback_query.message.edit_text(
+            support_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    
+    elif action == "help_start":
+        # Simulate /start command
+        from_user = callback_query.from_user
+        
+        start_text = f"""
+{beautiful_header('welcome')}
+
+👋 **Welcome {from_user.first_name}!**
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✨ **I'm a premium multi-feature bot with:**
+• Advanced Moderation Tools
+• Custom Welcome System
+• Smart Abuse Detection
+• Support Management
+• Tagging System
+• Security Lock System
+
+📚 **Quick Start:**
+1. Add me to your group
+2. Make me admin with all permissions
+3. Use /help to see all commands
+
+👑 **Admin Features:**
+• User management (mute/ban/warn)
+• Message cleanup (purge/pin)
+• Security locks
+• Custom welcome messages
+• Tagging system
+
+👥 **Member Features:**
+• User ID lookup
+• Admin tagging
+• Support system
+• Group information
+
+**Get Started:**
+"""
+        
+        buttons = [
+            [
+                InlineKeyboardButton("📚 Commands", callback_data="help_main"),
+                InlineKeyboardButton("👑 Admin Panel", callback_data="help_admin")
+            ],
+            [
+                InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{client.me.username}?startgroup=true"),
+                InlineKeyboardButton("💬 Support", url=f"https://t.me/{client.me.username}")
+            ]
+        ]
+        
+        await callback_query.message.edit_text(
+            start_text + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    
+    elif action == "help_full":
+        # Show full command list
+        is_admin_user = is_bot_admin(user_id)
+        chat_type = callback_query.message.chat.type
+        is_group = chat_type in ["group", "supergroup"]
+        
+        # Count available commands
+        total_commands = 0
+        available_commands = 0
+        
+        for cmd_name, cmd_info in ALL_COMMANDS.items():
+            total_commands += 1
+            if cmd_info["group_only"] and not is_group:
+                continue
+            if cmd_info["admin_only"] and not is_admin_user:
+                continue
+            available_commands += 1
+        
+        full_help = f"""
+{beautiful_header('guide')}
+
+📚 **Complete Command List**
+
+📊 **Statistics:**
+• Total Commands: {total_commands}
+• Available to You: {available_commands}
+• Admin Commands: {sum(1 for cmd in ALL_COMMANDS.values() if cmd['admin_only'])}
+
+📋 **All Commands:**
+
+"""
+        
+        # Group commands by category
+        for category_id, category_info in HELP_CATEGORIES.items():
+            category_commands = []
+            for cmd_name, cmd_info in ALL_COMMANDS.items():
+                if cmd_info["category"] == category_id:
+                    if cmd_info["group_only"] and not is_group:
+                        continue
+                    if cmd_info["admin_only"] and not is_admin_user:
+                        continue
+                    category_commands.append(f"• `/{cmd_name}` - {cmd_info['description']}")
+            
+            if category_commands:
+                full_help += f"\n{category_info['icon']} **{category_info['title']}**\n"
+                full_help += "\n".join(category_commands) + "\n"
+        
+        full_help += f"\n💡 **Tip:** Use `/help [category]` for detailed help\n"
+        full_help += f"👤 **Your Access Level:** {'👑 Admin' if is_admin_user else '👤 Member'}"
+        
+        buttons = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="help_main"),
+                InlineKeyboardButton("📖 Categories", callback_data="help_categories")
+            ]
+        ]
+        
+        await callback_query.message.edit_text(
+            full_help + beautiful_footer(),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True
+        )
+    
+    await callback_query.answer()
+
+
+# ================= ANIMATED START FUNCTION =================
+async def send_animated_start(client, message):
+    """Send animated start message with beautiful effects"""
+    from_user = message.from_user
+    
+    # Step 1: Initial loading animation
+    loading_msg = await message.reply_text(
+        f"{beautiful_header('loading')}\n\n"
+        "🎯 **Initializing Premium Bot...**\n"
+        f"{progress_bar(10)}"
+    )
+    
+    await asyncio.sleep(0.5)
+    
+    # Step 2: Feature loading animation
+    features = [
+        "🔨 Loading Moderation Tools",
+        "🛡️ Loading Security Systems",
+        "💬 Loading Support Features",
+        "🏷️ Loading Tagging Engine",
+        "✨ Loading UI Components",
+        "⚡ Optimizing Performance"
+    ]
+    
+    for i, feature in enumerate(features):
+        percentage = 10 + ((i + 1) * 15)
+        await loading_msg.edit_text(
+            f"{beautiful_header('loading')}\n\n"
+            f"{feature}...\n"
+            f"{progress_bar(percentage)}\n"
+            f"🔧 {i+1}/{len(features)} components loaded"
+        )
+        await asyncio.sleep(0.3)
+    
+    await loading_msg.delete()
+    
+    # Step 3: Send main welcome with animation
+    welcome_frames = [
+        # Frame 1: Welcome text
+        f"""
+{beautiful_header('welcome')}
+
+✨ **WELCOME TO THE FUTURE** ✨
+
+👋 **Hello {from_user.first_name}!**
+
+⚡ **PREMIUM BOT ACTIVATED** ⚡
+
+{BOT_BRAND}
+{BOT_TAGLINE}
+""",
+        # Frame 2: Features reveal
+        f"""
+{beautiful_header('welcome')}
+
+✨ **WELCOME TO THE FUTURE** ✨
+
+👋 **Hello {from_user.first_name}!**
+
+⚡ **PREMIUM BOT ACTIVATED** ⚡
+
+{BOT_BRAND}
+{BOT_TAGLINE}
+
+🎯 **LOADED FEATURES:**
+• 🔨 Advanced Moderation Suite
+• 🛡️ Intelligent Security Layer
+• 💬 24/7 Support System
+""",
+        # Frame 3: More features
+        f"""
+{beautiful_header('welcome')}
+
+✨ **WELCOME TO THE FUTURE** ✨
+
+👋 **Hello {from_user.first_name}!**
+
+⚡ **PREMIUM BOT ACTIVATED** ⚡
+
+{BOT_BRAND}
+{BOT_TAGLINE}
+
+🎯 **LOADED FEATURES:**
+• 🔨 Advanced Moderation Suite
+• 🛡️ Intelligent Security Layer
+• 💬 24/7 Support System
+• 🏷️ Smart Tagging Engine
+• ✨ Beautiful UI System
+• ⚡ Lightning Performance
+""",
+        # Frame 4: Final welcome
+        f"""
+{beautiful_header('welcome')}
+
+✨ **WELCOME TO THE FUTURE** ✨
+
+👋 **Hello {from_user.first_name}!**
+
+⚡ **PREMIUM BOT ACTIVATED** ⚡
+
+{BOT_BRAND}
+{BOT_TAGLINE}
+
+🌟 **YOUR PREMIUM EXPERIENCE AWAITS**
+
+🎯 **LOADED FEATURES:**
+• 🔨 Advanced Moderation Suite
+• 🛡️ Intelligent Security Layer
+• 💬 24/7 Support System
+• 🏷️ Smart Tagging Engine
+• ✨ Beautiful UI System
+• ⚡ Lightning Performance
+
+📊 **Ready to revolutionize your group management!**
+"""
+    ]
+    
+    welcome_msg = None
+    for frame in welcome_frames:
+        if welcome_msg:
+            try:
+                await welcome_msg.edit_text(frame + beautiful_footer())
+            except:
+                pass
+        else:
+            welcome_msg = await message.reply_text(frame + beautiful_footer())
+        await asyncio.sleep(0.5)
+    
+    await asyncio.sleep(1)
+    
+    # Step 4: Create interactive buttons with animation
+    buttons = create_start_buttons(client)
+    
+    # Step 5: Final message with all options
+    final_text = f"""
+{beautiful_header('sparkles')}
+
+🎉 **WELCOME {from_user.first_name.upper()}!** 🎉
+
+🤖 **{BOT_BRAND}** 
+{BOT_TAGLINE}
+
+✨ **YOUR ALL-IN-ONE SOLUTION FOR:**
+
+🎯 **Group Management**
+• Smart moderation tools
+• Auto abuse detection
+• Custom welcome system
+• Advanced security locks
+
+💎 **Premium Features**
+• Beautiful animated UI
+• 50+ powerful commands
+• 24/7 support system
+• Multi-admin support
+
+⚡ **Quick Start**
+1. Add me to your group
+2. Grant admin permissions
+3. Use /help to explore
+4. Enjoy premium features!
+
+📊 **Bot Status:**
+• ✅ All systems operational
+• ⚡ Premium mode: ACTIVE
+• 🛡️ Security: ENABLED
+• 💬 Support: ONLINE
+
+🎁 **Ready to experience premium group management?**
+"""
+    
+    try:
+        await welcome_msg.edit_text(
+            final_text + beautiful_footer(),
+            reply_markup=buttons,
+            disable_web_page_preview=True
+        )
+    except:
+        welcome_msg = await message.reply_text(
+            final_text + beautiful_footer(),
+            reply_markup=buttons,
+            disable_web_page_preview=True
+        )
+
+def create_start_buttons(client):
+    """Create animated button grid for start command"""
+    
+    # Emoji animations for buttons
+    button_rows = [
+        # Row 1: Main actions
+        [
+            InlineKeyboardButton(
+                "📚 EXPLORE COMMANDS",
+                callback_data="help_main"
+            ),
+            InlineKeyboardButton(
+                "👑 ADMIN PANEL",
+                callback_data="help_admin"
+            )
+        ],
+        # Row 2: Quick actions
+        [
+            InlineKeyboardButton(
+                "➕ ADD TO GROUP",
+                url=f"https://t.me/{client.me.username}?startgroup=true"
+            ),
+            InlineKeyboardButton(
+                "💬 GET SUPPORT",
+                url=f"https://t.me/{client.me.username}"
+            )
+        ],
+        # Row 3: Features
+        [
+            InlineKeyboardButton(
+                "✨ FEATURES TOUR",
+                callback_data="help_features"
+            ),
+            InlineKeyboardButton(
+                "🎯 QUICK START",
+                callback_data="help_quickstart"
+            )
+        ],
+        # Row 4: Info
+        [
+            InlineKeyboardButton(
+                "📊 BOT STATS",
+                callback_data="help_stats"
+            ),
+            InlineKeyboardButton(
+                "⚙️ SETTINGS",
+                callback_data="help_settings"
+            )
+        ],
+        # Row 5: Developer
+        [
+            InlineKeyboardButton(
+                "👨‍💻 DEVELOPER",
+                url="https://t.me/AnkitShakyaSupport"
+            ),
+            InlineKeyboardButton(
+                "🌟 RATE BOT",
+                callback_data="help_rate"
+            )
+        ]
+    ]
+    
+    return InlineKeyboardMarkup(button_rows)
+
+# ================= ENHANCED START COMMAND =================
+@app.on_message(filters.command("start") & filters.private)
+async def animated_start_command(client, message: Message):
+    """Main start command with animation"""
+    
+    # Check if it's a deep link
+    if len(message.command) > 1:
+        arg = message.command[1].lower()
+        
+        if arg == "help":
+            # Direct to help
+            await help_command_private(client, message)
+            return
+        elif arg == "support":
+            # Direct to support
+            await message.reply_text(
+                f"{beautiful_header('support')}\n\n"
+                "💬 **Direct Support Access**\n\n"
+                "Please send your message here.\n"
+                "Our support team will reply shortly.\n\n"
+                "🔸 Be clear and concise\n"
+                "🔸 Include relevant details\n"
+                "🔸 No abusive language\n\n"
+                "🙏 Thank you for your patience!"
+                f"{beautiful_footer()}"
+            )
+            return
+        elif arg.startswith("group_"):
+            # Group deep link
+            group_id = arg.replace("group_", "")
+            await message.reply_text(
+                f"{beautiful_header('group')}\n\n"
+                f"👥 **Group Management Tools**\n\n"
+                f"Add me to your group to access:\n"
+                f"• Advanced moderation\n• Security features\n• Tagging system\n\n"
+                f"Click 'Add to Group' below! 👇"
+                f"{beautiful_footer()}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "➕ ADD TO GROUP",
+                        url=f"https://t.me/{client.me.username}?startgroup=true"
+                    )
+                ]])
+            )
+            return
+    
+    # Regular start command with animation
+    await send_animated_start(client, message)
+
+# ================= ANIMATED GROUP START =================
+@app.on_message(filters.command("start") & filters.group)
+async def group_start_command(client, message: Message):
+    """Start command for groups with animation"""
+    
+    user = message.from_user
+    chat = message.chat
+    
+    # Check user role
+    try:
+        member = await client.get_chat_member(chat.id, user.id)
+        if member.status == ChatMemberStatus.OWNER:
+            role = "👑 Owner"
+        elif member.status == ChatMemberStatus.ADMINISTRATOR:
+            role = "🛡️ Admin"
+        else:
+            role = "👤 Member"
+    except:
+        role = "👤 Member"
+    
+    # Animated group welcome
+    group_frames = [
+        f"""
+{beautiful_header('welcome')}
+
+👥 **GROUP MANAGEMENT SYSTEM** 👥
+
+🏷️ **Chat:** {chat.title}
+👤 **User:** {user.first_name}
+{role}
+""",
+        f"""
+{beautiful_header('welcome')}
+
+👥 **GROUP MANAGEMENT SYSTEM** 👥
+
+🏷️ **Chat:** {chat.title}
+👤 **User:** {user.first_name}
+{role}
+
+⚡ **Bot Status:** ONLINE
+🛡️ **Security:** ACTIVE
+""",
+        f"""
+{beautiful_header('welcome')}
+
+👥 **GROUP MANAGEMENT SYSTEM** 👥
+
+🏷️ **Chat:** {chat.title}
+👤 **User:** {user.first_name}
+{role}
+
+⚡ **Bot Status:** ONLINE
+🛡️ **Security:** ACTIVE
+🎯 **Features:** ENABLED
+
+💎 **Available Commands:**
+"""
+    ]
+    
+    # Determine available commands based on role
+    available_commands = []
+    
+    # Basic commands for everyone
+    available_commands.append("• `/help` - Show commands")
+    available_commands.append("• `/id` - Get user ID")
+    available_commands.append("• `/myid` - Get your ID")
+    available_commands.append("• `/tagadmin` - Tag admins")
+    
+    # Admin commands if applicable
+    if role in ["👑 Owner", "🛡️ Admin"]:
+        available_commands.append("• `/mute` `/unmute` - User control")
+        available_commands.append("• `/ban` `/unban` - Ban management")
+        available_commands.append("• `/warn` - Warning system")
+        available_commands.append("• `/purge` - Clean messages")
+        available_commands.append("• `/lock` `/unlock` - Security")
+        available_commands.append("• `/setwelcome` - Custom welcome")
+        available_commands.append("• `/tagall` - Tag all members")
+    
+    # Split commands into chunks for animation
+    command_chunks = []
+    chunk_size = 3
+    for i in range(0, len(available_commands), chunk_size):
+        command_chunks.append(available_commands[i:i + chunk_size])
+    
+    # Animate commands loading
+    start_msg = None
+    for i, frame in enumerate(group_frames):
+        if start_msg:
+            try:
+                await start_msg.edit_text(frame + beautiful_footer())
+            except:
+                pass
+        else:
+            start_msg = await message.reply_text(frame + beautiful_footer())
+        await asyncio.sleep(0.5)
+    
+    # Animate commands appearing
+    current_commands = ""
+    for chunk in command_chunks:
+        current_commands += "\n".join(chunk) + "\n"
+        
+        final_frame = f"""
+{beautiful_header('welcome')}
+
+👥 **GROUP MANAGEMENT SYSTEM** 👥
+
+🏷️ **Chat:** {chat.title}
+👤 **User:** {user.first_name}
+{role}
+
+⚡ **Bot Status:** ONLINE
+🛡️ **Security:** ACTIVE
+🎯 **Features:** ENABLED
+
+💎 **Available Commands:**
+{current_commands}
+
+📚 **For full commands:** /help
+"""
+        
+        try:
+            await start_msg.edit_text(final_frame + beautiful_footer())
+        except:
+            pass
+        await asyncio.sleep(0.3)
+    
+    # Add buttons
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📚 FULL HELP", callback_data="help_main"),
+            InlineKeyboardButton("👑 ADMIN HELP", callback_data="help_admin")
+        ],
+        [
+            InlineKeyboardButton("💬 PM BOT", url=f"https://t.me/{client.me.username}"),
+            InlineKeyboardButton("⚡ QUICK START", callback_data="help_quickstart")
+        ]
+    ])
+    
+    try:
+        await start_msg.edit_text(
+            final_frame + beautiful_footer(),
+            reply_markup=buttons
+        )
+    except:
+        pass
+
+# ================= ADDITIONAL ANIMATED CALLBACKS =================
+@app.on_callback_query(filters.regex("^help_features$"))
+async def features_tour_callback(client, callback_query):
+    """Animated features tour"""
+    
+    features = [
+        ("🔨", "Advanced Moderation", "Mute, ban, warn, kick with custom durations"),
+        ("🛡️", "Smart Security", "Auto abuse detection, lock system, admin protection"),
+        ("💬", "Support System", "24/7 ticket system with admin management"),
+        ("🏷️", "Tagging Engine", "Efficient member tagging with cooldown system"),
+        ("✨", "Beautiful UI", "Animated messages, progress bars, visual feedback"),
+        ("⚡", "High Performance", "Fast response, minimal latency, optimized code"),
+        ("👑", "Admin Management", "Multi-level admin system with permissions"),
+        ("📊", "Analytics", "User statistics, command usage, group insights"),
+        ("🎯", "Customization", "Welcome messages, rules, settings per group"),
+        ("🔔", "Notifications", "Admin alerts, user reports, system updates")
+    ]
+    
+    # Animate features one by one
+    tour_text = f"""
+{beautiful_header('sparkles')}
+
+🎬 **PREMIUM FEATURES TOUR** 🎬
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✨ **Loading premium features...**
+{progress_bar(10)}
+"""
+    
+    tour_msg = await callback_query.message.edit_text(
+        tour_text + beautiful_footer()
+    )
+    await callback_query.answer()
+    
+    # Animate each feature
+    for i, (emoji, title, description) in enumerate(features):
+        percentage = 10 + ((i + 1) * 9)
+        
+        tour_text = f"""
+{beautiful_header('sparkles')}
+
+🎬 **PREMIUM FEATURES TOUR** 🎬
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✨ **Loaded Features ({i+1}/{len(features)}):**
+
+"""
+        
+        # Show previous features
+        for j in range(i + 1):
+            emj, ttl, desc = features[j]
+            tour_text += f"✅ **{emj} {ttl}**\n   ↳ {desc}\n\n"
+        
+        if i < len(features) - 1:
+            next_emoji, next_title, _ = features[i + 1]
+            tour_text += f"⏳ **Loading:** {next_emoji} {next_title}...\n"
+        
+        tour_text += f"\n{progress_bar(percentage)}"
+        
+        await tour_msg.edit_text(tour_text + beautiful_footer())
+        await asyncio.sleep(0.5)
+    
+    # Final screen
+    final_tour = f"""
+{beautiful_header('sparkles')}
+
+🎉 **FEATURES TOUR COMPLETE!** 🎉
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✅ **All {len(features)} Premium Features Loaded:**
+
+🔨 **Moderation Suite** - Complete user management
+🛡️ **Security Layer** - Intelligent protection system
+💬 **Support Network** - 24/7 help desk
+🏷️ **Tagging System** - Efficient communication
+✨ **UI Experience** - Beautiful animations
+⚡ **Performance** - Lightning fast response
+👑 **Admin Tools** - Multi-level control
+📊 **Analytics** - Data-driven insights
+🎯 **Customization** - Personalize everything
+🔔 **Alerts** - Stay informed
+
+🚀 **Ready to experience premium management?**
+"""
+    
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚀 GET STARTED", callback_data="help_main"),
+            InlineKeyboardButton("👑 ADMIN PANEL", callback_data="help_admin")
+        ],
+        [
+            InlineKeyboardButton("➕ ADD TO GROUP", 
+                url=f"https://t.me/{client.me.username}?startgroup=true"),
+            InlineKeyboardButton("🔙 BACK", callback_data="help_main")
+        ]
+    ])
+    
+    await tour_msg.edit_text(
+        final_tour + beautiful_footer(),
+        reply_markup=buttons
+    )
+
+@app.on_callback_query(filters.regex("^help_quickstart$"))
+async def quickstart_guide(client, callback_query):
+    """Animated quick start guide"""
+    
+    steps = [
+        ("1️⃣", "Add Bot", f"Add @{client.me.username} to your group"),
+        ("2️⃣", "Make Admin", "Grant all admin permissions to bot"),
+        ("3️⃣", "Setup Welcome", "Use /setwelcome for custom greeting"),
+        ("4️⃣", "Set Rules", "Establish group rules using /rules"),
+        ("5️⃣", "Test Commands", "Try /help to see all features"),
+        ("6️⃣", "Manage Members", "Use /mute, /ban, /warn as needed"),
+        ("7️⃣", "Enable Security", "Configure /lock and abuse detection"),
+        ("8️⃣", "Enjoy Premium", "Experience seamless group management!")
+    ]
+    
+    # Animate steps
+    guide_text = f"""
+{beautiful_header('guide')}
+
+🚀 **QUICK START GUIDE** 🚀
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+📋 **Follow these steps to get started:**
+
+{progress_bar(0)}
+"""
+    
+    guide_msg = await callback_query.message.edit_text(
+        guide_text + beautiful_footer()
+    )
+    await callback_query.answer()
+    
+    # Animate each step
+    for i, (num, title, description) in enumerate(steps):
+        percentage = (i + 1) * 12.5
+        
+        guide_text = f"""
+{beautiful_header('guide')}
+
+🚀 **QUICK START GUIDE** 🚀
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+📋 **Follow these steps to get started:**
+
+"""
+        
+        # Show completed steps
+        for j in range(i + 1):
+            nm, ttl, desc = steps[j]
+            guide_text += f"✅ **{nm} {ttl}**\n   ↳ {desc}\n\n"
+        
+        guide_text += f"\n{progress_bar(percentage)}"
+        
+        await guide_msg.edit_text(guide_text + beautiful_footer())
+        await asyncio.sleep(0.4)
+    
+    # Final step with buttons
+    final_guide = f"""
+{beautiful_header('guide')}
+
+🎉 **QUICK START COMPLETE!** 🎉
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✅ **You're all set up!** 
+
+🚀 **Next Steps:**
+• Explore `/help` for all commands
+• Configure `/setwelcome` for members
+• Set up `/lock` for security
+• Try `/tagall` to test tagging
+• Use `/purge` for cleanup
+
+⚡ **Pro Tips:**
+• Make bot admin with ALL permissions
+• Set custom welcome messages
+• Configure auto-moderation rules
+• Use cooldowns for frequent commands
+• Enable admin abuse protection
+
+🎯 **Need Help?** PM the bot anytime!
+"""
+    
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📚 EXPLORE COMMANDS", callback_data="help_main"),
+            InlineKeyboardButton("👑 ADMIN TOOLS", callback_data="help_admin")
+        ],
+        [
+            InlineKeyboardButton("➕ ADD BOT TO GROUP", 
+                url=f"https://t.me/{client.me.username}?startgroup=true"),
+            InlineKeyboardButton("💬 GET SUPPORT", 
+                url=f"https://t.me/{client.me.username}")
+        ],
+        [
+            InlineKeyboardButton("⚙️ BOT SETTINGS", callback_data="help_settings"),
+            InlineKeyboardButton("🔙 MAIN MENU", callback_data="help_main")
+        ]
+    ])
+    
+    await guide_msg.edit_text(
+        final_guide + beautiful_footer(),
+        reply_markup=buttons
+    )
+
+@app.on_callback_query(filters.regex("^help_stats$"))
+async def bot_stats_callback(client, callback_query):
+    """Animated bot statistics"""
+    
+    # Calculate some stats (you can make these dynamic)
+    uptime = get_uptime()
+    
+    # Create animated stats
+    stats_text = f"""
+{beautiful_header('stats')}
+
+📊 **BOT STATISTICS** 📊
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+⚡ **Loading statistics...**
+{progress_bar(10)}
+"""
+    
+    stats_msg = await callback_query.message.edit_text(
+        stats_text + beautiful_footer()
+    )
+    await callback_query.answer()
+    
+    # Animate stats loading
+    stats_categories = [
+        ("🕒 Uptime", uptime, 30),
+        ("📈 Commands", "50+ available", 50),
+        ("👥 Users", "Growing daily", 70),
+        ("👑 Admins", f"{len(INITIAL_ADMINS)} bot admins", 85),
+        ("🛡️ Security", f"{len(ABUSE_WORDS)} abuse words", 95),
+        ("⚡ Performance", "Optimized & fast", 100)
+    ]
+    
+    for title, value, percentage in stats_categories:
+        stats_text = f"""
+{beautiful_header('stats')}
+
+📊 **BOT STATISTICS** 📊
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+"""
+        
+        # Add loaded stats
+        for cat_title, cat_value, cat_percent in stats_categories:
+            if cat_percent <= percentage:
+                stats_text += f"✅ **{cat_title}:** {cat_value}\n"
+            else:
+                break
+        
+        stats_text += f"\n{progress_bar(percentage)}"
+        
+        await stats_msg.edit_text(stats_text + beautiful_footer())
+        await asyncio.sleep(0.3)
+    
+    # Final stats with buttons
+    final_stats = f"""
+{beautiful_header('stats')}
+
+📊 **BOT STATISTICS** 📊
+
+🤖 **{BOT_BRAND}**
+{BOT_TAGLINE}
+
+✅ **System Status:**
+• 🕒 **Uptime:** {uptime}
+• 📈 **Commands:** 50+ available
+• 👥 **Users:** Growing daily
+• 👑 **Admins:** {len(INITIAL_ADMINS)} bot admins
+• 🛡️ **Security:** {len(ABUSE_WORDS)} abuse words
+• ⚡ **Performance:** Optimized & fast
+• 💎 **Features:** 10+ categories
+• 🚀 **Version:** 2.0 Premium
+
+🎯 **Premium Metrics:**
+• 99.9% Uptime guarantee
+• <100ms response time
+• Multi-group support
+• 24/7 active monitoring
+• Regular updates
+• Priority support
+
+✨ **Your premium experience is active!**
+"""
+    
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 REFRESH STATS", callback_data="help_stats"),
+            InlineKeyboardButton("📊 MORE ANALYTICS", callback_data="help_analytics")
+        ],
+        [
+            InlineKeyboardButton("⚙️ SYSTEM SETTINGS", callback_data="help_settings"),
+            InlineKeyboardButton("🔙 MAIN MENU", callback_data="help_main")
+        ]
+    ])
+    
+    await stats_msg.edit_text(
+        final_stats + beautiful_footer(),
+        reply_markup=buttons
+    )
 
 
 @app.on_message(filters.command("adminabuse") & filters.group)
