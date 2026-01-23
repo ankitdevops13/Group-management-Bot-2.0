@@ -531,7 +531,7 @@ def get_uptime() -> str:
       
 # ================= FIXED ABUSE WARNING FUNCTION =================
 # Remove the duplicate abuse_warning functions and use this unified version:
-def abuse_warning(chat_id, user_id):
+def abuse_warnings(chat_id, user_id):
     """Add abuse warning for user in chat"""
     cur.execute(
         "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
@@ -674,7 +674,7 @@ def is_blocked(uid):
     cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
     return cur.fetchone() is not None
 
-def abuse_warnings(uid):
+def abuse_warning(uid):
     cur.execute("INSERT OR IGNORE INTO abuse_warning VALUES (?,0)", (uid,))
     cur.execute("UPDATE abuse_warning SET count=count+1 WHERE user_id=?", (uid,))
     conn.commit()
@@ -7075,7 +7075,7 @@ async def user_handler(client, message: Message):
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warnings(uid)
+        count = abuse_warning(uid)
 
         if count >= 2:
             cur.execute(
