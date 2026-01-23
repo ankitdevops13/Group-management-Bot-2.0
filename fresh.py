@@ -7033,20 +7033,79 @@ def footer(text):
 🤖 {BOT_BRAND}
 ✨ {BOT_TAGLINE}
 ━━━━━━━━━━━━━━━━━━"""
+# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
+
+@app.on_message(filters.private & filters.user(INITIAL_ADMINS), group=0)
+async def admin_reply_handler(client, message: Message):
+
+    if not message.from_user or message.from_user.is_bot:
+        return
+
+    admin_id = message.from_user.id
+
+    # admin hi allowed
+    if not is_admin(admin_id):
+        return
+
+    # reply target check
+    cur.execute(
+        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
+        (admin_id,)
+    )
+    row = cur.fetchone()
+
+    if not row:
+        return  # reply mode off
+
+    user_id = row[0]
+
+    try:
+        # ---------- SEND ----------
+        if message.text:
+            await client.send_message(
+                user_id,
+                f"{beautiful_header('support')}\n\n"
+                f"💌 {message.text}"
+                f"{beautiful_footer()}"
+            )
+            mtype, content = "text", message.text
+        else:
+            await message.copy(user_id)
+            mtype, content = "media", "MEDIA"
+
+        # ---------- SAVE HISTORY ----------
+        cur.execute(
+            """
+            INSERT INTO contact_history
+            (user_id, sender, message_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, "admin", mtype, content)
+        )
+        conn.commit()
+
+        # ✅ NOW clear reply mode (AFTER success)
+        cur.execute(
+            "DELETE FROM admin_reply_target WHERE admin_id=?",
+            (admin_id,)
+        )
+        conn.commit()
+
+        await message.reply_text("✅ Reply sent to user")
+
+    except Exception as e:
+        await message.reply_text(f"❌ Failed to send reply\n`{e}`")
+
 
 # ============================ USER HANDLER ============================
 
-@app.on_message(filters.private, group=1)
+@app.on_message(filters.private & ~filters.user(INITIAL_ADMINS), group=1)
 async def user_handler(client, message: Message):
 
     if not message.from_user or message.from_user.is_bot:
         return
 
     uid = message.from_user.id
-
-    # ---------- ADMIN CHECK ----------
-    if is_admin(uid):
-        return
 
     # ---------- BLOCK CHECK ----------
     if is_blocked_user(uid):
@@ -7061,10 +7120,7 @@ async def user_handler(client, message: Message):
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
 
-        # ✅ FIXED CALL
         count = abuse_warning(message.chat.id, uid)
-
-        
 
         if count >= 2:
             cur.execute(
@@ -7086,10 +7142,7 @@ async def user_handler(client, message: Message):
             return
 
     # ---------- AUTO REPLY ----------
-    cur.execute(
-        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
-        (uid,)
-    )
+    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
     first_time = not cur.fetchone()
 
     if first_time:
@@ -7138,73 +7191,7 @@ async def user_handler(client, message: Message):
                 )
         except:
             continue
-            
-# ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
-@app.on_message(filters.private, group=0)
-async def admin_reply_handler(client, message: Message):
 
-    # ❌ Bot ke apne messages ignore
-    if message.from_user.is_bot:
-        return
-
-    admin_id = message.from_user.id
-
-    # ❌ Agar admin nahi hai → ignore
-    if not is_admin(admin_id):
-        return
-
-    # ✅ Check: reply mode ON hai ya nahi
-    cur.execute(
-        "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
-        (admin_id,)
-    )
-    row = cur.fetchone()
-
-    # ❌ Reply mode OFF → normal admin chat
-    if not row:
-        return
-
-    user_id = row[0]
-
-    # 🔴 IMPORTANT: pehle hi reply mode clear karo
-    # (warna loop / echo ban jata hai)
-    cur.execute(
-        "DELETE FROM admin_reply_target WHERE admin_id=?",
-        (admin_id,)
-    )
-    conn.commit()
-
-    try:
-        # ---------- SEND MESSAGE ----------
-        if message.text:
-            # TEXT
-            await client.send_message(
-                user_id,
-                f"{beautiful_header('SUPPORT REPLY')}\n\n"
-                f"💌 {message.text}\n\n"
-                f"{beautiful_footer()}"
-            )
-            mtype, content = "text", message.text
-        else:
-            # ALL MEDIA (photo, video, doc, audio, voice, sticker, gif…)
-            await message.copy(user_id)
-            mtype, content = "media", "MEDIA"
-
-        # ---------- SAVE HISTORY ----------
-        cur.execute(
-            """
-            INSERT INTO contact_history
-            (user_id, sender, message_type, content)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, "admin", mtype, content)
-        )
-        conn.commit()
-
-        await message.reply_text("✅ Reply sent to user")
-
-    except Exception as e:
-        await message.reply_text(f"❌ Failed to send reply\n`{e}`")
 
 
 @app.on_message(filters.group & filters.text, group=3)
@@ -7416,7 +7403,9 @@ def admin_button(uid):
     ])
 
 
-@app.on_callback_query(filters.regex("^rules$"))
+
+
+@app.on_callback_query(filters.regex("^rules$"), group=0)
 async def rules_cb(client, cq):
     await cq.answer()
     await cq.message.reply_text(
@@ -7429,8 +7418,8 @@ async def rules_cb(client, cq):
         "🙏 Dhanyavaad"
         f"{beautiful_footer()}"
     )
-
-@app.on_callback_query(filters.regex("^contact_support$"))
+    
+@app.on_callback_query(filters.regex("^contact_support$"), group=0)
 async def contact_support_cb(client, cq):
     await cq.answer()
     await cq.message.reply_text(
@@ -7442,40 +7431,21 @@ async def contact_support_cb(client, cq):
     )
 
 
-@app.on_callback_query(filters.regex("^reply:"))
-async def cb_reply(client, cq):
-
-    if cq.from_user.is_bot:
-        return
-
-    admin_id = cq.from_user.id
+@app.on_callback_query(filters.regex(r"reply_(\d+)"))
+async def set_reply_target(client, cb):
+    uid = int(cb.matches[0].group(1))
+    admin_id = cb.from_user.id
 
     if not is_admin(admin_id):
-        await cq.answer("Not allowed", show_alert=True)
-        return
-
-    try:
-        user_id = int(cq.data.split(":")[1])
-    except:
-        await cq.answer("Invalid target", show_alert=True)
-        return
+        return await cb.answer("Not admin", show_alert=True)
 
     cur.execute(
         "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
-        (admin_id, user_id)
+        (admin_id, uid)
     )
     conn.commit()
 
-    await cq.message.reply_text(
-        f"{beautiful_header('support')}\n\n"
-        "✍️ **Reply Mode ON**\n\n"
-        "Ab aap apna message (text / photo / video / document / voice) bhejein.\n"
-        "Agla message **direct user ko** jayega ✅"
-        f"{beautiful_footer()}"
-    )
-
-    await cq.answer("Reply mode enabled ✅")
-
+    await cb.message.reply("✏️ Reply mode ON. Send message now.")
 
 # ================= BLOCK / UNBLOCK / HISTORY =================
 @app.on_callback_query(filters.regex("^block:"))
