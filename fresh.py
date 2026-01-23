@@ -6045,9 +6045,242 @@ async def bot_stats_callback(client, callback_query):
     )
 
 # ================= BROADCAST SYSTEM =================
+# ================= USER & GROUP TRACKING SYSTEM =================
+@app.on_message(filters.private)
+async def track_private_users(client, message):
+    """Track all users who message the bot in PM"""
+    
+    if message.from_user.is_bot:
+        return
+    
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    last_name = message.from_user.last_name
+    
+    # Save user to database
+    cur.execute("""
+        INSERT OR REPLACE INTO users 
+        (user_id, username, first_name, last_name, last_active) 
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (user_id, username, first_name, last_name))
+    conn.commit()
+
+@app.on_message(filters.group)
+async def track_groups(client, message):
+    """Track all groups where bot is added"""
+    
+    # Only track when bot is mentioned or command used
+    if message.text and (f"@{client.me.username}" in message.text or message.text.startswith("/")):
+        chat_id = message.chat.id
+        title = message.chat.title
+        username = message.chat.username
+        added_by = message.from_user.id if message.from_user else 0
+        
+        # Save group to database
+        cur.execute("""
+            INSERT OR REPLACE INTO groups 
+            (chat_id, title, username, added_by, added_date) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (chat_id, title, username, added_by))
+        conn.commit()
+
+@app.on_message(filters.command("start") & filters.group)
+async def track_group_on_start(client, message):
+    """Track group when /start is used"""
+    chat_id = message.chat.id
+    title = message.chat.title
+    username = message.chat.username
+    added_by = message.from_user.id
+    
+    cur.execute("""
+        INSERT OR REPLACE INTO groups 
+        (chat_id, title, username, added_by, added_date) 
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (chat_id, title, username, added_by))
+    conn.commit()
+
+# ================= MANUAL ADD COMMANDS =================
+@app.on_message(filters.command("adduser") & filters.private)
+async def add_user_manually(client, message):
+    """Manually add a user to database"""
+    
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
+        return
+    
+    if len(message.command) < 2:
+        await message.reply_text("Usage: `/adduser user_id`")
+        return
+    
+    try:
+        user_id = int(message.command[1])
+        
+        try:
+            user = await client.get_users(user_id)
+            username = user.username
+            first_name = user.first_name
+            last_name = user.last_name
+        except:
+            username = "unknown"
+            first_name = "Unknown"
+            last_name = "User"
+        
+        cur.execute("""
+            INSERT OR REPLACE INTO users 
+            (user_id, username, first_name, last_name) 
+            VALUES (?, ?, ?, ?)
+        """, (user_id, username, first_name, last_name))
+        conn.commit()
+        
+        await message.reply_text(f"✅ User {user_id} added to database!")
+        
+    except ValueError:
+        await message.reply_text("❌ Invalid user ID!")
+
+@app.on_message(filters.command("addgroup") & filters.private)
+async def add_group_manually(client, message):
+    """Manually add a group to database"""
+    
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
+        return
+    
+    if len(message.command) < 2:
+        await message.reply_text("Usage: `/addgroup chat_id`")
+        return
+    
+    try:
+        chat_id = int(message.command[1])
+        
+        try:
+            chat = await client.get_chat(chat_id)
+            title = chat.title
+            username = chat.username
+        except:
+            title = "Unknown Group"
+            username = None
+        
+        cur.execute("""
+            INSERT OR REPLACE INTO groups 
+            (chat_id, title, username, added_by) 
+            VALUES (?, ?, ?, ?)
+        """, (chat_id, title, username, message.from_user.id))
+        conn.commit()
+        
+        await message.reply_text(f"✅ Group {chat_id} added to database!")
+        
+    except ValueError:
+        await message.reply_text("❌ Invalid chat ID!")
+
+# ================= LIST COMMANDS =================
+@app.on_message(filters.command("listusers") & filters.private)
+async def list_users(client, message):
+    """List all users in database"""
+    
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
+        return
+    
+    cur.execute("SELECT COUNT(*) FROM users")
+    total = cur.fetchone()[0]
+    
+    if total == 0:
+        await message.reply_text("📭 No users in database!")
+        return
+    
+    cur.execute("SELECT user_id, username, first_name, last_active FROM users ORDER BY last_active DESC LIMIT 20")
+    users = cur.fetchall()
+    
+    text = f"👥 **Users in Database ({total} total)**\n\n"
+    
+    for user_id, username, first_name, last_active in users:
+        username_display = f"@{username}" if username else "No username"
+        text += f"• `{user_id}` - {first_name} ({username_display})\n"
+    
+    await message.reply_text(text)
+
+@app.on_message(filters.command("listgroups") & filters.private)
+async def list_groups(client, message):
+    """List all groups in database"""
+    
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
+        return
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    total = cur.fetchone()[0]
+    
+    if total == 0:
+        await message.reply_text("📭 No groups in database!")
+        return
+    
+    cur.execute("SELECT chat_id, title, username FROM groups ORDER BY added_date DESC LIMIT 20")
+    groups = cur.fetchall()
+    
+    text = f"👥 **Groups in Database ({total} total)**\n\n"
+    
+    for chat_id, title, username in groups:
+        username_display = f"@{username}" if username else "No username"
+        text += f"• `{chat_id}` - {title} ({username_display})\n"
+    
+    await message.reply_text(text)
+
+# ================= BROADCAST STATS COMMAND =================
+@app.on_message(filters.command("broadcaststats") & filters.private)
+async def broadcast_stats(client, message):
+    """Show broadcast statistics"""
+    
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
+        return
+    
+    # User count
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    # Group count
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    # Total recipients
+    total_recipients = user_count + group_count
+    
+    # Broadcast history
+    cur.execute("SELECT COUNT(*) FROM broadcast_history")
+    broadcast_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT SUM(sent_count), SUM(failed_count) FROM broadcast_history")
+    result = cur.fetchone()
+    total_sent = result[0] or 0
+    total_failed = result[1] or 0
+    
+    stats_text = f"""
+📊 **Broadcast Statistics**
+
+👤 **Users:** {user_count}
+👥 **Groups:** {group_count}
+📋 **Total Recipients:** {total_recipients}
+
+📨 **Broadcast History:**
+• Total Broadcasts: {broadcast_count}
+• Total Messages Sent: {total_sent}
+• Total Failed: {total_failed}
+• Success Rate: {(total_sent/(total_sent+total_failed)*100 if (total_sent+total_failed) > 0 else 0):.1f}%
+
+💡 **Tips:**
+1. Users are auto-added when they PM bot
+2. Groups are auto-added when bot is used
+3. Use `/adduser` or `/addgroup` to add manually
+4. Use `/listusers` or `/listgroups` to view
+    """
+    
+    await message.reply_text(stats_text)
+
+# ================= ENHANCED BROADCAST COMMAND =================
 @app.on_message(filters.command(["broadcast", "bc"]) & filters.private)
 async def broadcast_command(client, message):
-    """Broadcast message to all users/groups"""
+    """Enhanced broadcast command with better error handling"""
     
     # Check if user is bot admin
     if not is_bot_admin(message.from_user.id):
@@ -6070,6 +6303,13 @@ async def broadcast_command(client, message):
 • `support` - Support users only
 
 **Example:** Reply + `/broadcast all`
+
+**Other Commands:**
+• `/listusers` - View all users
+• `/listgroups` - View all groups
+• `/broadcaststats` - View statistics
+• `/adduser [id]` - Manually add user
+• `/addgroup [id]` - Manually add group
         """
         await message.reply_text(help_text)
         return
@@ -6086,6 +6326,51 @@ async def broadcast_command(client, message):
         await message.reply_text(f"❌ Invalid target! Use: {', '.join(valid_targets)}")
         return
     
+    # Get counts for confirmation
+    user_count = 0
+    group_count = 0
+    
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    # Calculate expected recipients
+    if target == "all":
+        expected = user_count + group_count
+    elif target == "pm":
+        expected = user_count
+    elif target == "groups":
+        expected = group_count
+    elif target == "support":
+        cur.execute("SELECT COUNT(DISTINCT user_id) FROM contact_history")
+        expected = cur.fetchone()[0]
+    
+    if expected == 0:
+        no_users_text = f"""
+❌ **No Recipients Found!**
+
+**Reason:** No {target} found in database.
+
+**Solutions:**
+1. Ask users to PM the bot first
+2. Use bot in groups (auto-adds them)
+3. Add manually:
+   • `/adduser [user_id]` - Add user
+   • `/addgroup [chat_id]` - Add group
+4. Check current data:
+   • `/listusers` - View users
+   • `/listgroups` - View groups
+   • `/broadcaststats` - View statistics
+
+**Current Counts:**
+• Users: {user_count}
+• Groups: {group_count}
+        """
+        await message.reply_text(no_users_text)
+        return
+    
     # Get target name for display
     target_names = {
         "all": "All Users & Groups",
@@ -6095,264 +6380,171 @@ async def broadcast_command(client, message):
     }
     
     # Confirm broadcast
-    confirm_msg = await message.reply_text(
-        f"⚠️ **Confirm Broadcast**\n\n"
-        f"**Target:** {target_names[target]}\n"
-        f"**From:** {message.from_user.mention}\n"
-        f"**Message Type:** {'Media' if message.reply_to_message.media else 'Text'}\n\n"
-        f"Are you sure?",
+    confirm_text = f"""
+⚠️ **Confirm Broadcast**
+
+**Target:** {target_names[target]}
+**Expected Recipients:** {expected}
+**From:** {message.from_user.mention}
+**Message Type:** {'Media' if message.reply_to_message.media else 'Text'}
+
+**Are you sure you want to send this to {expected} recipients?**
+    """
+    
+    await message.reply_text(
+        confirm_text,
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Yes, Send", callback_data=f"bc_confirm:{target}"),
                 InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel")
-            ]
-        ])
-    )
-    
-    # Store message reference
-    await message.delete()
-
-@app.on_callback_query(filters.regex("^bc_confirm:"))
-async def broadcast_confirm(client, callback_query):
-    """Confirm and start broadcast"""
-    
-    target = callback_query.data.split(":")[1]
-    admin = callback_query.from_user
-    original_msg = callback_query.message.reply_to_message
-    
-    await callback_query.answer("Starting broadcast...")
-    
-    # Update status
-    status_msg = await callback_query.message.edit_text(
-        f"📤 **Broadcast Started**\n\n"
-        f"Target: {target}\n"
-        f"Collecting recipients..."
-    )
-    
-    # Get recipients
-    recipients = []
-    
-    if target == "all":
-        # Get all users and groups
-        cur.execute("SELECT user_id FROM users")
-        users = cur.fetchall()
-        recipients.extend([uid[0] for uid in users])
-        
-        cur.execute("SELECT chat_id FROM groups")
-        groups = cur.fetchall()
-        recipients.extend([gid[0] for gid in groups])
-    
-    elif target == "pm":
-        # Get PM users only
-        cur.execute("SELECT user_id FROM users")
-        users = cur.fetchall()
-        recipients.extend([uid[0] for uid in users])
-    
-    elif target == "groups":
-        # Get groups only
-        cur.execute("SELECT chat_id FROM groups")
-        groups = cur.fetchall()
-        recipients.extend([gid[0] for gid in groups])
-    
-    elif target == "support":
-        # Get support users
-        cur.execute("SELECT DISTINCT user_id FROM contact_history")
-        support_users = cur.fetchall()
-        recipients.extend([uid[0] for uid in support_users])
-    
-    # Remove duplicates and invalid IDs
-    recipients = list(set(recipients))
-    recipients = [rid for rid in recipients if rid and rid != (await client.get_me()).id]
-    
-    if not recipients:
-        await status_msg.edit_text("❌ No recipients found!")
-        return
-    
-    total = len(recipients)
-    sent = 0
-    failed = 0
-    
-    # Update with progress
-    await status_msg.edit_text(
-        f"📤 **Broadcasting...**\n\n"
-        f"Target: {target}\n"
-        f"Total: {total} recipients\n"
-        f"Progress: 0/{total}\n"
-        f"✅ Sent: 0\n"
-        f"❌ Failed: 0"
-    )
-    
-    # Send messages
-    for i, chat_id in enumerate(recipients):
-        try:
-            if original_msg.text:
-                await client.send_message(chat_id, original_msg.text)
-            elif original_msg.photo:
-                await client.send_photo(
-                    chat_id,
-                    original_msg.photo.file_id,
-                    caption=original_msg.caption
-                )
-            elif original_msg.video:
-                await client.send_video(
-                    chat_id,
-                    original_msg.video.file_id,
-                    caption=original_msg.caption
-                )
-            elif original_msg.document:
-                await client.send_document(
-                    chat_id,
-                    original_msg.document.file_id,
-                    caption=original_msg.caption
-                )
-            else:
-                # Try to copy any other message type
-                await original_msg.copy(chat_id)
-            
-            sent += 1
-            
-            # Update progress every 10 messages
-            if i % 10 == 0 or i == total - 1:
-                await status_msg.edit_text(
-                    f"📤 **Broadcasting...**\n\n"
-                    f"Target: {target}\n"
-                    f"Total: {total} recipients\n"
-                    f"Progress: {i+1}/{total}\n"
-                    f"✅ Sent: {sent}\n"
-                    f"❌ Failed: {failed}"
-                )
-            
-            # Small delay to avoid flood
-            await asyncio.sleep(0.05)
-            
-        except Exception as e:
-            failed += 1
-            print(f"Failed to send to {chat_id}: {e}")
-    
-    # Save to history
-    cur.execute("""
-        INSERT INTO broadcast_history 
-        (admin_id, target, sent_count, failed_count) 
-        VALUES (?, ?, ?, ?)
-    """, (admin.id, target, sent, failed))
-    conn.commit()
-    
-    # Send completion report
-    success_rate = (sent / total * 100) if total > 0 else 0
-    
-    completion_text = f"""
-✅ **Broadcast Completed**
-
-📊 **Statistics:**
-• Target: {target}
-• Total Recipients: {total}
-• Successfully Sent: {sent}
-• Failed: {failed}
-• Success Rate: {success_rate:.1f}%
-
-👤 **Admin:** {admin.mention}
-🕒 **Time:** {datetime.now().strftime('%I:%M %p')}
-    """
-    
-    await status_msg.edit_text(
-        completion_text,
-        reply_markup=InlineKeyboardMarkup([
+            ],
             [
-                InlineKeyboardButton("📋 History", callback_data="bc_history"),
-                InlineKeyboardButton("🔄 Send Again", callback_data="bc_again")
+                InlineKeyboardButton("📊 View Stats", callback_data="bc_stats")
             ]
         ])
     )
 
-@app.on_callback_query(filters.regex("^bc_history$"))
-async def broadcast_history(client, callback_query):
-    """Show broadcast history"""
+# ================= QUICK ADD BOT USERS =================
+@app.on_message(filters.command("quickadd") & filters.private)
+async def quick_add_users(client, message):
+    """Quickly add bot admins and known users to database"""
     
-    if not is_bot_admin(callback_query.from_user.id):
-        await callback_query.answer("Admin only!", show_alert=True)
+    if not is_bot_admin(message.from_user.id):
+        await message.reply_text("❌ Admin only!")
         return
     
+    added_count = 0
+    
+    # Add all bot admins
+    cur.execute("SELECT admin_id FROM admins")
+    admins = cur.fetchall()
+    
+    for (admin_id,) in admins:
+        try:
+            user = await client.get_users(admin_id)
+            cur.execute("""
+                INSERT OR IGNORE INTO users 
+                (user_id, username, first_name, last_name) 
+                VALUES (?, ?, ?, ?)
+            """, (admin_id, user.username, user.first_name, user.last_name))
+            added_count += 1
+        except:
+            pass
+    
+    # Add SUPER_ADMIN
+    try:
+        user = await client.get_users(SUPER_ADMIN)
+        cur.execute("""
+            INSERT OR IGNORE INTO users 
+            (user_id, username, first_name, last_name) 
+            VALUES (?, ?, ?, ?)
+        """, (SUPER_ADMIN, user.username, user.first_name, user.last_name))
+        added_count += 1
+    except:
+        pass
+    
+    conn.commit()
+    
+    await message.reply_text(f"✅ Added {added_count} users to database!\n\nNow use `/broadcast pm` to test.")
+
+# ================= INITIALIZE WITH SAMPLE DATA =================
+def init_broadcast_tables():
+    """Initialize broadcast tables with sample data"""
+    
+    print("🔄 Setting up broadcast system...")
+    
+    # Users table
     cur.execute("""
-        SELECT id, target, sent_count, failed_count, timestamp 
-        FROM broadcast_history 
-        ORDER BY id DESC 
-        LIMIT 10
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
+            joined_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
     """)
-    history = cur.fetchall()
     
-    if not history:
-        await callback_query.message.edit_text("📭 No broadcast history found!")
-        return
-    
-    history_text = "📋 **Broadcast History**\n\n"
-    
-    for row in history:
-        broadcast_id, target, sent, failed, timestamp = row
-        total = sent + failed
-        success_rate = (sent / total * 100) if total > 0 else 0
-        
-        history_text += f"""
-**#{broadcast_id}** - {target}
-✅ {sent} | ❌ {failed} | 📊 {success_rate:.1f}%
-🕒 {timestamp}
-━━━━━━━━━━━━━━━━
-        """
-    
-    await callback_query.message.edit_text(
-        history_text,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back", callback_data="bc_back")]
-        ])
-    )
-
-@app.on_callback_query(filters.regex("^bc_cancel$"))
-async def broadcast_cancel(client, callback_query):
-    """Cancel broadcast"""
-    await callback_query.message.edit_text("❌ Broadcast cancelled!")
-    await callback_query.answer()
-
-@app.on_callback_query(filters.regex("^bc_back$"))
-async def broadcast_back(client, callback_query):
-    """Go back to broadcast menu"""
-    await broadcast_command(client, callback_query.message)
-
-# ================= USER/GROUP TRACKING =================
-@app.on_message(filters.private & filters.command(["start", "help"]))
-async def track_user_activity(client, message):
-    """Track user activity in database"""
-
-    if not message.from_user or message.from_user.is_bot:
-        return
-
-    user_id = message.from_user.id
-    username = message.from_user.username or ""
-    first_name = message.from_user.first_name or ""
-    last_name = message.from_user.last_name or ""
-
-    cur.execute(
-        """
-        INSERT OR REPLACE INTO users 
-        (user_id, username, first_name, last_name, last_active)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """,
-        (user_id, username, first_name, last_name)
-    )
-    conn.commit()
-    
-@app.on_message(filters.group & filters.command("start"))
-async def track_group_activity(client, message):
-    """Track group when bot is added"""
-    
-    chat = message.chat
-    added_by = message.from_user.id
-    
-    # Insert or update group
+    # Groups table
     cur.execute("""
-        INSERT OR REPLACE INTO groups 
-        (chat_id, title, username, added_by) 
-        VALUES (?, ?, ?, ?)
-    """, (chat.id, chat.title, chat.username, added_by))
+        CREATE TABLE IF NOT EXISTS groups (
+            chat_id INTEGER PRIMARY KEY,
+            title TEXT,
+            username TEXT,
+            added_by INTEGER,
+            added_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Broadcast history table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS broadcast_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER,
+            target TEXT,
+            message_type TEXT,
+            caption TEXT,
+            file_id TEXT,
+            sent_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     conn.commit()
+    
+    # Add bot admins automatically
+    try:
+        print("👥 Adding bot admins to users table...")
+        
+        # Add SUPER_ADMIN
+        cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
+                   (SUPER_ADMIN, "Super Admin"))
+        
+        # Add other admins
+        for admin_id in INITIAL_ADMINS:
+            cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)", 
+                       (admin_id, f"Admin {admin_id}"))
+        
+        conn.commit()
+        
+    except Exception as e:
+        print(f"⚠️ Could not add admins: {e}")
+    
+    # Count records
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    print(f"✅ Broadcast system ready!")
+    print(f"📊 Current data: {user_count} users, {group_count} groups")
+
+# ================= TEST BROADCAST COMMAND =================
+@app.on_message(filters.command("testbroadcast") & filters.private)
+async def test_broadcast(client, message):
+    """Test broadcast with dummy data"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    # Add some dummy users if database empty
+    cur.execute("SELECT COUNT(*) FROM users")
+    if cur.fetchone()[0] == 0:
+        # Add current user
+        cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+                   (message.from_user.id, message.from_user.first_name))
+        
+        # Add bot admins
+        for admin_id in INITIAL_ADMINS[:3]:  # First 3 admins
+            cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+                       (admin_id, f"Test Admin {admin_id}"))
+        
+        conn.commit()
+        await message.reply_text("✅ Added test users. Now try `/broadcast pm`")
+    else:
+        await message.reply_text("✅ Database already has users. Use `/broadcast pm` to test.")
 
 
 @app.on_message(filters.command("adminabuse") & filters.group)
@@ -6979,23 +7171,44 @@ async def start_background_tasks():
         
 # ================== RUN ==================
 # ================= MAIN EXECUTION =================
+# ================= MAIN EXECUTION =================
 if __name__ == "__main__":
-    init_broadcast_tables()
     print("=" * 50)
     print(f"🤖 {BOT_BRAND}")
     print(f"✨ {BOT_TAGLINE}")
     print("=" * 50)
-    print("✅ Bot starting with features:")
-    print("• Support System")
-    print("• Group Management")
-    print("• Bot Admin System")
-    print("• Group Admin System")
-    print("• Admin Type Checking")
-    print("• Beautiful UI")
-    print("• Auto-Moderation System with abuse detection")
-    print(f"• {len(ABUSE_WORDS)} abusive words/phrases in database")
+    
+    # Initialize all tables
+    init_broadcast_tables()
+    initialize_admins()
+    
+    # Show counts
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM admins")
+    admin_count = cur.fetchone()[0]
+    
+    print(f"📊 Database initialized:")
+    print(f"   👤 Users: {user_count}")
+    print(f"   👥 Groups: {group_count}")
+    print(f"   👑 Admins: {admin_count}")
     print("=" * 50)
-    print(f"📋 Initialized {len(INITIAL_ADMINS)} bot admins")
+    
+    # Tips for user
+    print("💡 **Broadcast System Ready!**")
+    print("To use broadcast:")
+    print("1. First, PM the bot (auto-adds you to users)")
+    print("2. Or use `/quickadd` to add bot admins")
+    print("3. Then reply to message + `/broadcast pm`")
+    print("=" * 50)
+    
+    # Run bot
+    print("🚀 Starting bot...")
+    
     
     # Create event loop
     loop = asyncio.get_event_loop()
