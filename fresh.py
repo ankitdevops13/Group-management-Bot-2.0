@@ -335,10 +335,7 @@ CREATE TABLE IF NOT EXISTS pm_abuse_warns (
 """)
 # ================= INDEX (FAST LOOKUP) =================
 
-cur.execute("""
-CREATE INDEX IF NOT EXISTS idx_abuse_warnings
-ON abuse_warnings(chat_id, user_id)
-""")
+
 # ================= INITIALIZE WITH SAMPLE DATA =================
 def init_broadcast_tables():
     """Initialize broadcast tables with sample data"""
