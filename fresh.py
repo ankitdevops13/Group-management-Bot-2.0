@@ -7071,8 +7071,8 @@ async def user_handler(client, message: Message):
         return
 
     # ---------- ABUSE CHECK ----------
-    abuse_text = message.text or message.caption
-    if abuse_text and contains_abuse(abuse_text):
+    if not ABUSE_REGEX.search(message.text):
+        return
 
         # ✅ FIXED CALL
         count = abuse_warning(message.chat.id, uid)
