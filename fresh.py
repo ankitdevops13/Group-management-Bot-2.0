@@ -125,22 +125,21 @@ CREATE TABLE IF NOT EXISTS contact_history (
 # ================= AUTO REPLY TRACKER =================
 # (First PM auto-reply)
 # ======================================================
-cur.execute("""
-CREATE TABLE IF NOT EXISTS auto_reply_sent (
-    user_id INTEGER PRIMARY KEY
-)
-""")
+cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS abuse_warning (user_id INTEGER PRIMARY KEY, count INTEGER)")
 
 # ======================================================
 # ================= ADMIN REPLY MODE ===================
 # (Inline support reply target)
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admin_reply_target (
     admin_id INTEGER PRIMARY KEY,
     user_id INTEGER
 )
 """)
+
 
 # ======================================================
 # ================= ABUSE / WARN SYSTEM ================
@@ -676,10 +675,10 @@ def is_blocked(uid):
     return cur.fetchone() is not None
 
 def abuse_warnings(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    cur.execute("INSERT OR IGNORE INTO abuse_warning VALUES (?,0)", (uid,))
+    cur.execute("UPDATE abuse_warning SET count=count+1 WHERE user_id=?", (uid,))
     conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
+    cur.execute("SELECT count FROM abuse_warning WHERE user_id=?", (uid,))
     return cur.fetchone()[0]
 
 
