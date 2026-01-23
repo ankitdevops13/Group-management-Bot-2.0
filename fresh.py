@@ -1397,6 +1397,58 @@ def bot_admin(user_id: int) -> bool:
 
 
 
+# Pin message - requires bot admin OR group admin
+@app.on_message(filters.command(["pin", "pinmsg"]) & filters.group)
+async def pin_message(client: Client, message: Message):
+    """Pin a message with admin permission check"""
+    try:
+        # Check if user replied to a message
+        if not message.reply_to_message:
+            await message.reply("❌ **Please reply to a message to pin it.**")
+            return
+        
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        # ===== Permission check =====
+        is_bot_admin_user = bot_admin(user_id)
+        can_pin = await can_user_pin_messages(client, chat_id, user_id)
+        
+        if not (is_bot_admin_user or can_pin):
+            await message.reply("❌ **You don't have permission to pin messages!**\n"
+                              "You need to be either:\n"
+                              "• Bot Administrator\n"
+                              "• Group Administrator with pin permission")
+            return
+        
+        # Pin the message
+        disable_notification = False
+        
+        # Check for silent flag
+        if len(message.command) > 1 and message.command[1].lower() in ['silent', 'quiet']:
+            disable_notification = True
+        
+        await client.pin_chat_message(
+            chat_id=chat_id,
+            message_id=message.reply_to_message.id,
+            disable_notification=disable_notification
+        )
+        
+        # Send confirmation
+        if disable_notification:
+            await message.reply("🔕 **Message pinned silently!**")
+        else:
+            await message.reply("📌 **Message pinned successfully!**")
+        
+        # Optional: Delete the command message
+        try:
+            await message.delete()
+        except:
+            pass
+        
+    except Exception as e:
+        await message.reply(f"❌ **Failed to pin message:** `{str(e)}`")
+
 
 # Unpin specific message - requires bot admin OR group admin
 @app.on_message(filters.command(["unpin", "unpinmsg"]) & filters.group)
@@ -1429,104 +1481,8 @@ async def unpin_message(client: Client, message: Message):
 
 
 # ================================= Pin System ========================
-@app.on_message(filters.command(["pin", "bpin"]) & filters.group)
-async def pin_message(client, message: Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-
-    # Permission check
-    is_bot_admin_user = is_admin(user_id)
-    can_pin = await can_user_restrict(client, chat_id, user_id)
-
-    if not (is_bot_admin_user or can_pin):
-        return await message.reply_text("❌ You don't have permission to pin messages.")
-
-    # Bot permission
-    bot = await client.get_chat_member(chat_id, "me")
-    if bot.status != ChatMemberStatus.ADMINISTRATOR or not bot.privileges.can_pin_messages:
-        return await message.reply_text("❌ Make me admin with **Pin Messages** permission.")
-
-    # Target message
-    if message.reply_to_message:
-        target_msg_id = message.reply_to_message.id
-    elif len(message.command) > 1 and message.command[1].isdigit():
-        target_msg_id = int(message.command[1])
-    else:
-        return await message.reply_text(
-            "❌ Reply to a message or use:\n`/pin <message_id>`"
-        )
-
-    try:
-        await client.pin_chat_message(
-            chat_id=chat_id,
-            message_id=target_msg_id,
-            disable_notification=True
-        )
-        await message.reply_text("📌 **Message pinned successfully!**")
-    except Exception as e:
-        await message.reply_text(f"❌ Pin failed\n`{e}`")
 
 
-
-
-@app.on_message(filters.command(["unpin", "bunpin"]) & filters.group)
-async def unpin_message(client, message: Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-
-    # ===== Permission check =====
-    is_bot_admin_user = is_admin(user_id)
-    can_pin = await can_user_restrict(client, chat_id, user_id)
-
-    if not (is_bot_admin_user or can_pin):
-        return await message.reply_text(
-            "❌ You don't have permission to unpin messages.",
-            parse_mode=None
-        )
-
-    # ===== Bot permission check =====
-    try:
-        bot = await client.get_chat_member(chat_id, "me")
-        if bot.status != ChatMemberStatus.ADMINISTRATOR:
-            return await message.reply_text(
-                "❌ Make me admin with **Pin Messages** permission.",
-                parse_mode=None
-            )
-
-        if hasattr(bot, "privileges") and not bot.privileges.can_pin_messages:
-            return await message.reply_text(
-                "❌ I need **Pin Messages** permission.",
-                parse_mode=None
-            )
-    except:
-        return await message.reply_text(
-            "❌ Unable to verify bot permissions.",
-            parse_mode=None
-        )
-
-    # ===== MAIN LOGIC =====
-    try:
-        chat = await client.get_chat(chat_id)
-
-        # 🔥 MOST IMPORTANT CHECK
-        if not chat.pinned_message:
-            return await message.reply_text(
-                "ℹ️ No pinned message found in this chat.",
-                parse_mode=None
-            )
-
-        await client.unpin_chat_message(chat_id)
-
-        await message.reply_text(
-            "📌 Pinned message unpinned successfully!",
-            parse_mode=None
-        )
-
-    except Exception as e:
-        await message.reply_text(
-            f"❌ Unpin failed\nError: {e}",
-            parse_mode=None
-        )
 
 
 # ================= ADMIN MANAGEMENT COMMANDS =================
