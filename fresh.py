@@ -482,7 +482,7 @@ def beautiful_header(title: str) -> str:
 
 def beautiful_footer() -> str:
     """Add beautiful footer to messages"""
-    footer_line = "──────────────────────"
+    footer_line = "─────────────────────"
     return f"\n{footer_line}\n✨ {BOT_BRAND} | {BOT_TAGLINE}\n{footer_line}"
 
 def format_user_mention(user) -> str:
@@ -7058,7 +7058,7 @@ async def admin_abuse_toggle(client, message: Message):
         return await message.reply(f"⚙️ **Admin abuse system:** {status}")
 
 
-@app.on_message(filters.group & filters.text, group=1)
+@app.on_message(filters.group & filters.text, group=2)
 async def admin_call_detector(client, message: Message):
     text = message.text.lower()
 
@@ -7081,7 +7081,7 @@ async def admin_call_detector(client, message: Message):
 
 
 
-@app.on_message(filters.group & filters.text, group=2)
+@app.on_message(filters.group & filters.text, group=3)
 async def admin_abuse_delete_handler(client, message: Message):
 
     if not ADMIN_ABUSE_ENABLED:
@@ -7127,7 +7127,7 @@ async def admin_abuse_delete_handler(client, message: Message):
 
 MUTE_TIME = 600  # 10 minutes
 
-@app.on_message(filters.group & filters.text, group=3)
+@app.on_message(filters.group & filters.text, group=4)
 async def final_auto_abuse_handler(client, message):
     if not message.from_user:
         return
@@ -7375,7 +7375,7 @@ async def cb_reply(client, cq):
 
     await cq.answer("Reply mode enabled ✅")
 
-@app.on_message(filters.private, group=4)
+@app.on_message(filters.private, group=0)
 async def user_handler(client, message: Message):
 
     if not message.from_user or message.from_user.is_bot:
@@ -7478,7 +7478,7 @@ async def user_handler(client, message: Message):
 
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
 
-@app.on_message(filters.private, group=0)
+@app.on_message(filters.private, group=1)
 async def admin_reply_handler(client, message: Message):
 
     if message.from_user.is_bot:
