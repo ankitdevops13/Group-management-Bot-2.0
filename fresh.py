@@ -7049,7 +7049,7 @@ async def admin_abuse_toggle(client, message: Message):
 
 # ============================ USER HANDLER ============================
 
-@app.on_message(filters.private, group=0)
+@app.on_message(filters.private, group=1)
 async def user_handler(client, message: Message):
 
     if not message.from_user or message.from_user.is_bot:
@@ -7071,8 +7071,9 @@ async def user_handler(client, message: Message):
         return
 
     # ---------- ABUSE CHECK ----------
-    if not ABUSE_REGEX.search(message.text):
-        return
+    abuse_text = message.text or message.caption
+    if abuse_text and contains_abuse(abuse_text):
+        count = abuse_warning(uid)
 
         # ✅ FIXED CALL
         count = abuse_warning(message.chat.id, uid)
@@ -7153,7 +7154,7 @@ async def user_handler(client, message: Message):
 
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
 
-@app.on_message(filters.private, group=1)
+@app.on_message(filters.private, group=0)
 async def admin_reply_handler(client, message: Message):
 
     if message.from_user.is_bot:
