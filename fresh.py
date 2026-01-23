@@ -5555,18 +5555,42 @@ def create_start_buttons(client):
 # ================= ENHANCED START COMMAND =================
 @app.on_message(filters.command("start") & filters.private)
 async def animated_start_command(client, message: Message):
-    """Main start command with animation"""
-    
-    # Check if it's a deep link
+    """Main start command with animation + user tracking"""
+
+    if not message.from_user or message.from_user.is_bot:
+        return
+
+    # ======== TRACK USER IN DATABASE ========
+    user = message.from_user
+    try:
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO users
+            (user_id, username, first_name, last_name, last_active)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or ""
+            )
+        )
+        conn.commit()
+        print(f"✅ User {user.id} added to broadcast database")
+    except Exception as e:
+        print(f"⚠️ Error adding user to DB: {e}")
+    # =======================================
+
+    # -------- DEEP LINK HANDLING --------
     if len(message.command) > 1:
         arg = message.command[1].lower()
-        
+
         if arg == "help":
-            # Direct to help
             await help_command_private(client, message)
             return
+
         elif arg == "support":
-            # Direct to support
             await message.reply_text(
                 f"{beautiful_header('support')}\n\n"
                 "💬 **Direct Support Access**\n\n"
@@ -5579,15 +5603,16 @@ async def animated_start_command(client, message: Message):
                 f"{beautiful_footer()}"
             )
             return
+
         elif arg.startswith("group_"):
-            # Group deep link
-            group_id = arg.replace("group_", "")
             await message.reply_text(
                 f"{beautiful_header('group')}\n\n"
-                f"👥 **Group Management Tools**\n\n"
-                f"Add me to your group to access:\n"
-                f"• Advanced moderation\n• Security features\n• Tagging system\n\n"
-                f"Click 'Add to Group' below! 👇"
+                "👥 **Group Management Tools**\n\n"
+                "Add me to your group to access:\n"
+                "• Advanced moderation\n"
+                "• Security features\n"
+                "• Tagging system\n\n"
+                "Click 'Add to Group' below! 👇"
                 f"{beautiful_footer()}",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(
@@ -5597,19 +5622,23 @@ async def animated_start_command(client, message: Message):
                 ]])
             )
             return
-    
-    # Regular start command with animation
+    # ------------------------------------
+
+    # -------- NORMAL START --------
     await send_animated_start(client, message)
 
 # ================= ANIMATED GROUP START =================
 @app.on_message(filters.command("start") & filters.group)
 async def group_start_command(client, message: Message):
     """Start command for groups with animation"""
-    
+
+    if not message.from_user or not message.chat:
+        return
+
     user = message.from_user
     chat = message.chat
-    
-    # Check user role
+
+    # -------- CHECK USER ROLE --------
     try:
         member = await client.get_chat_member(chat.id, user.id)
         if member.status == ChatMemberStatus.OWNER:
@@ -5618,13 +5647,12 @@ async def group_start_command(client, message: Message):
             role = "🛡️ Admin"
         else:
             role = "👤 Member"
-    except:
+    except Exception:
         role = "👤 Member"
-    
-    # Animated group welcome
+
+    # -------- ANIMATED GROUP WELCOME --------
     group_frames = [
-        f"""
-{beautiful_header('welcome')}
+        f"""{beautiful_header('welcome')}
 
 👥 **GROUP MANAGEMENT SYSTEM** 👥
 
@@ -5632,8 +5660,7 @@ async def group_start_command(client, message: Message):
 👤 **User:** {user.first_name}
 {role}
 """,
-        f"""
-{beautiful_header('welcome')}
+        f"""{beautiful_header('welcome')}
 
 👥 **GROUP MANAGEMENT SYSTEM** 👥
 
@@ -5644,8 +5671,7 @@ async def group_start_command(client, message: Message):
 ⚡ **Bot Status:** ONLINE
 🛡️ **Security:** ACTIVE
 """,
-        f"""
-{beautiful_header('welcome')}
+        f"""{beautiful_header('welcome')}
 
 👥 **GROUP MANAGEMENT SYSTEM** 👥
 
@@ -5660,35 +5686,28 @@ async def group_start_command(client, message: Message):
 💎 **Available Commands:**
 """
     ]
-    
-    # Determine available commands based on role
-    available_commands = []
-    
-    # Basic commands for everyone
-    available_commands.append("• `/help` - Show commands")
-    available_commands.append("• `/id` - Get user ID")
-    available_commands.append("• `/myid` - Get your ID")
-    available_commands.append("• `/tagadmin` - Tag admins")
-    
-    # Admin commands if applicable
-    if role in ["👑 Owner", "🛡️ Admin"]:
-        available_commands.append("• `/mute` `/unmute` - User control")
-        available_commands.append("• `/ban` `/unban` - Ban management")
-        available_commands.append("• `/warn` - Warning system")
-        available_commands.append("• `/purge` - Clean messages")
-        available_commands.append("• `/lock` `/unlock` - Security")
-        available_commands.append("• `/setwelcome` - Custom welcome")
-        available_commands.append("• `/tagall` - Tag all members")
-    
-    # Split commands into chunks for animation
-    command_chunks = []
-    chunk_size = 3
-    for i in range(0, len(available_commands), chunk_size):
-        command_chunks.append(available_commands[i:i + chunk_size])
-    
-    # Animate commands loading
+
+    available_commands = [
+        "• `/help` - Show commands",
+        "• `/id` - Get user ID",
+        "• `/myid` - Get your ID",
+        "• `/tagadmin` - Tag admins",
+    ]
+
+    if role in ("👑 Owner", "🛡️ Admin"):
+        available_commands.extend([
+            "• `/mute` `/unmute` - User control",
+            "• `/ban` `/unban` - Ban management",
+            "• `/warn` - Warning system",
+            "• `/purge` - Clean messages",
+            "• `/lock` `/unlock` - Security",
+            "• `/setwelcome` - Custom welcome",
+            "• `/tagall` - Tag all members",
+        ])
+
+    # -------- ANIMATION --------
     start_msg = None
-    for i, frame in enumerate(group_frames):
+    for frame in group_frames:
         if start_msg:
             try:
                 await start_msg.edit_text(frame + beautiful_footer())
@@ -5697,14 +5716,12 @@ async def group_start_command(client, message: Message):
         else:
             start_msg = await message.reply_text(frame + beautiful_footer())
         await asyncio.sleep(0.5)
-    
-    # Animate commands appearing
+
     current_commands = ""
-    for chunk in command_chunks:
-        current_commands += "\n".join(chunk) + "\n"
-        
-        final_frame = f"""
-{beautiful_header('welcome')}
+    for i in range(0, len(available_commands), 3):
+        current_commands += "\n".join(available_commands[i:i + 3]) + "\n"
+
+        final_frame = f"""{beautiful_header('welcome')}
 
 👥 **GROUP MANAGEMENT SYSTEM** 👥
 
@@ -5721,14 +5738,12 @@ async def group_start_command(client, message: Message):
 
 📚 **For full commands:** /help
 """
-        
         try:
             await start_msg.edit_text(final_frame + beautiful_footer())
         except:
             pass
         await asyncio.sleep(0.3)
-    
-    # Add buttons
+
     buttons = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📚 FULL HELP", callback_data="help_main"),
@@ -5739,7 +5754,7 @@ async def group_start_command(client, message: Message):
             InlineKeyboardButton("⚡ QUICK START", callback_data="help_quickstart")
         ]
     ])
-    
+
     try:
         await start_msg.edit_text(
             final_frame + beautiful_footer(),
@@ -5747,6 +5762,26 @@ async def group_start_command(client, message: Message):
         )
     except:
         pass
+
+    # ======== TRACK GROUP IN DATABASE (SAFE PLACE) ========
+    try:
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO groups
+            (chat_id, title, username, added_by, added_date)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                chat.id,
+                chat.title or "",
+                chat.username or "",
+                user.id
+            )
+        )
+        conn.commit()
+        print(f"✅ Group {chat.id} added to broadcast database")
+    except Exception as e:
+        print(f"⚠️ Error adding group to DB: {e}")
 
 # ================= ADDITIONAL ANIMATED CALLBACKS =================
 @app.on_callback_query(filters.regex("^help_features$"))
@@ -6264,9 +6299,19 @@ async def broadcast_stats(client, message):
     await message.reply_text(stats_text)
 
 # ================= ENHANCED BROADCAST COMMAND =================
+# ================= FIXED BROADCAST BUTTON SYSTEM =================
+
+# Step 1: Ensure proper imports
+import asyncio
+from pyrogram.types import CallbackQuery
+
+# Step 2: Store temporary broadcast data
+broadcast_sessions = {}
+
+# Step 3: Fixed Broadcast Command
 @app.on_message(filters.command(["broadcast", "bc"]) & filters.private)
-async def broadcast_command(client, message):
-    """Enhanced broadcast command with better error handling"""
+async def broadcast_command_fixed(client, message):
+    """Fixed broadcast command with working buttons"""
     
     # Check if user is bot admin
     if not is_bot_admin(message.from_user.id):
@@ -6293,9 +6338,7 @@ async def broadcast_command(client, message):
 **Other Commands:**
 • `/listusers` - View all users
 • `/listgroups` - View all groups
-• `/broadcaststats` - View statistics
-• `/adduser [id]` - Manually add user
-• `/addgroup [id]` - Manually add group
+• `/testbc` - Test broadcast system
         """
         await message.reply_text(help_text)
         return
@@ -6334,28 +6377,20 @@ async def broadcast_command(client, message):
         expected = cur.fetchone()[0]
     
     if expected == 0:
-        no_users_text = f"""
-❌ **No Recipients Found!**
-
-**Reason:** No {target} found in database.
-
-**Solutions:**
-1. Ask users to PM the bot first
-2. Use bot in groups (auto-adds them)
-3. Add manually:
-   • `/adduser [user_id]` - Add user
-   • `/addgroup [chat_id]` - Add group
-4. Check current data:
-   • `/listusers` - View users
-   • `/listgroups` - View groups
-   • `/broadcaststats` - View statistics
-
-**Current Counts:**
-• Users: {user_count}
-• Groups: {group_count}
-        """
-        await message.reply_text(no_users_text)
+        await message.reply_text(
+            f"❌ No {target} found in database!\n\n"
+            f"Use `/testbc` to add test users first."
+        )
         return
+    
+    # Store broadcast session
+    session_id = f"{message.from_user.id}_{message.id}"
+    broadcast_sessions[session_id] = {
+        "target": target,
+        "message": message.reply_to_message,
+        "admin": message.from_user,
+        "expected": expected
+    }
     
     # Get target name for display
     target_names = {
@@ -6365,7 +6400,7 @@ async def broadcast_command(client, message):
         "support": "Support Users Only"
     }
     
-    # Confirm broadcast
+    # Create confirmation message with working buttons
     confirm_text = f"""
 ⚠️ **Confirm Broadcast**
 
@@ -6377,18 +6412,546 @@ async def broadcast_command(client, message):
 **Are you sure you want to send this to {expected} recipients?**
     """
     
-    await message.reply_text(
+    # Create proper inline keyboard
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ YES, SEND NOW", callback_data=f"confirm_bc:{session_id}"),
+        ],
+        [
+            InlineKeyboardButton("❌ CANCEL", callback_data=f"cancel_bc:{session_id}"),
+            InlineKeyboardButton("📊 VIEW STATS", callback_data=f"stats_bc:{session_id}")
+        ]
+    ])
+    
+    confirm_msg = await message.reply_text(
         confirm_text,
+        reply_markup=keyboard
+    )
+    
+    # Store confirmation message ID
+    broadcast_sessions[session_id]["confirm_msg_id"] = confirm_msg.id
+
+# Step 4: Working Callback Handlers
+@app.on_callback_query()
+async def handle_all_callbacks(client, callback_query: CallbackQuery):
+    """Handle all callback queries"""
+    
+    data = callback_query.data
+    
+    # Broadcast confirm handler
+    if data.startswith("confirm_bc:"):
+        await handle_broadcast_confirm(client, callback_query)
+    
+    # Broadcast cancel handler
+    elif data.startswith("cancel_bc:"):
+        await handle_broadcast_cancel(client, callback_query)
+    
+    # Broadcast stats handler
+    elif data.startswith("stats_bc:"):
+        await handle_broadcast_stats(client, callback_query)
+    
+    # Test broadcast handler
+    elif data == "test_broadcast":
+        await handle_test_broadcast(client, callback_query)
+    
+    # History handler
+    elif data == "bc_history":
+        await handle_broadcast_history(client, callback_query)
+    
+    # Back handler
+    elif data == "bc_back":
+        await handle_broadcast_back(client, callback_query)
+
+async def handle_broadcast_confirm(client, callback_query):
+    """Handle broadcast confirmation"""
+    
+    session_id = callback_query.data.split(":")[1]
+    session_data = broadcast_sessions.get(session_id)
+    
+    if not session_data:
+        await callback_query.answer("Session expired!", show_alert=True)
+        return
+    
+    await callback_query.answer("Starting broadcast...")
+    
+    # Update message to show "Starting..."
+    await callback_query.message.edit_text(
+        "📤 **Starting Broadcast...**\n\n"
+        "Please wait while we collect recipients...",
+        reply_markup=None
+    )
+    
+    # Get data from session
+    target = session_data["target"]
+    original_msg = session_data["message"]
+    admin = session_data["admin"]
+    expected = session_data["expected"]
+    
+    # Get recipients
+    recipients = await get_recipients_list(target)
+    
+    if not recipients:
+        await callback_query.message.edit_text(
+            "❌ **No Recipients Found!**\n\n"
+            "No users/groups found in database.\n"
+            "Use `/testbc` to add test users first."
+        )
+        return
+    
+    total = len(recipients)
+    sent = 0
+    failed = 0
+    
+    # Show progress
+    progress_msg = await callback_query.message.edit_text(
+        f"📤 **Broadcasting...**\n\n"
+        f"Target: {target}\n"
+        f"Total: {total} recipients\n"
+        f"Progress: {progress_bar(0)}\n"
+        f"✅ Sent: 0/{total}\n"
+        f"❌ Failed: 0"
+    )
+    
+    # Send messages
+    for i, chat_id in enumerate(recipients):
+        try:
+            if original_msg.text:
+                await client.send_message(chat_id, original_msg.text)
+            elif original_msg.photo:
+                await client.send_photo(
+                    chat_id,
+                    original_msg.photo.file_id,
+                    caption=original_msg.caption or ""
+                )
+            elif original_msg.video:
+                await client.send_video(
+                    chat_id,
+                    original_msg.video.file_id,
+                    caption=original_msg.caption or ""
+                )
+            elif original_msg.document:
+                await client.send_document(
+                    chat_id,
+                    original_msg.document.file_id,
+                    caption=original_msg.caption or ""
+                )
+            else:
+                await original_msg.copy(chat_id)
+            
+            sent += 1
+            
+            # Update progress every 5 messages or at end
+            if i % 5 == 0 or i == total - 1:
+                percentage = int((i + 1) / total * 100)
+                await progress_msg.edit_text(
+                    f"📤 **Broadcasting...**\n\n"
+                    f"Target: {target}\n"
+                    f"Total: {total} recipients\n"
+                    f"Progress: {progress_bar(percentage)}\n"
+                    f"✅ Sent: {sent}/{total}\n"
+                    f"❌ Failed: {failed}"
+                )
+            
+            # Small delay
+            await asyncio.sleep(0.1)
+            
+        except Exception as e:
+            failed += 1
+    
+    # Save to history
+    message_type = "text"
+    caption = original_msg.text or ""
+    file_id = ""
+    
+    if original_msg.photo:
+        message_type = "photo"
+        file_id = original_msg.photo.file_id
+        caption = original_msg.caption or ""
+    elif original_msg.video:
+        message_type = "video"
+        file_id = original_msg.video.file_id
+        caption = original_msg.caption or ""
+    
+    cur.execute("""
+        INSERT INTO broadcast_history 
+        (admin_id, target, message_type, caption, file_id, sent_count, failed_count) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (admin.id, target, message_type, caption, file_id, sent, failed))
+    conn.commit()
+    
+    # Show completion
+    success_rate = (sent / total * 100) if total > 0 else 0
+    broadcast_id = cur.lastrowid
+    
+    completion_text = f"""
+✅ **Broadcast Completed!**
+
+📊 **Statistics:**
+• **Target:** {target}
+• **Total Recipients:** {total}
+• **Successfully Sent:** {sent}
+• **Failed:** {failed}
+• **Success Rate:** {success_rate:.1f}%
+• **Broadcast ID:** #{broadcast_id}
+
+👤 **Admin:** {admin.mention}
+🕒 **Time:** {datetime.now().strftime('%I:%M %p')}
+    """
+    
+    # Create completion buttons
+    completion_buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 SEND AGAIN", callback_data="test_broadcast"),
+            InlineKeyboardButton("📋 HISTORY", callback_data="bc_history")
+        ],
+        [
+            InlineKeyboardButton("📊 STATS", callback_data=f"stats_bc:{session_id}"),
+            InlineKeyboardButton("🏠 HOME", callback_data="bc_back")
+        ]
+    ])
+    
+    await progress_msg.edit_text(
+        completion_text,
+        reply_markup=completion_buttons
+    )
+    
+    # Clean up session
+    if session_id in broadcast_sessions:
+        del broadcast_sessions[session_id]
+
+async def handle_broadcast_cancel(client, callback_query):
+    """Handle broadcast cancellation"""
+    
+    session_id = callback_query.data.split(":")[1]
+    
+    await callback_query.answer("Broadcast cancelled!")
+    
+    await callback_query.message.edit_text(
+        "❌ **Broadcast Cancelled**\n\n"
+        "The broadcast has been cancelled."
+    )
+    
+    # Clean up session
+    if session_id in broadcast_sessions:
+        del broadcast_sessions[session_id]
+
+async def handle_broadcast_stats(client, callback_query):
+    """Show broadcast statistics"""
+    
+    session_id = callback_query.data.split(":")[1]
+    session_data = broadcast_sessions.get(session_id)
+    
+    if not session_data:
+        await callback_query.answer("Session expired!", show_alert=True)
+        return
+    
+    # Get counts
+    cur.execute("SELECT COUNT(*) FROM users")
+    user_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    group_count = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM broadcast_history")
+    bc_count = cur.fetchone()[0]
+    
+    stats_text = f"""
+📊 **Broadcast Statistics**
+
+👤 **Users in DB:** {user_count}
+👥 **Groups in DB:** {group_count}
+📨 **Total Broadcasts:** {bc_count}
+
+📋 **Current Session:**
+• Target: {session_data['target']}
+• Expected: {session_data['expected']} recipients
+
+💡 **Tip:** Use `/listusers` to see all users
+    """
+    
+    await callback_query.answer()
+    
+    # Create back button
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 BACK", callback_data=f"back_to_confirm:{session_id}")]
+    ])
+    
+    await callback_query.message.edit_text(
+        stats_text,
+        reply_markup=buttons
+    )
+
+async def handle_test_broadcast(client, callback_query):
+    """Handle test broadcast button"""
+    
+    await callback_query.answer("Adding test users...")
+    
+    # Add current user
+    user_id = callback_query.from_user.id
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (user_id, callback_query.from_user.first_name))
+    
+    # Add SUPER_ADMIN
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (SUPER_ADMIN, "Super Admin"))
+    
+    # Add 2 test users
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (999888777, "Test User 1"))
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (888777666, "Test User 2"))
+    
+    conn.commit()
+    
+    await callback_query.message.edit_text(
+        "✅ **Test Users Added!**\n\n"
+        "Added 4 test users to database.\n\n"
+        "Now reply to a message and use:\n"
+        "`/broadcast pm`\n\n"
+        "Or click the button below to send a test message:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 SEND TEST BROADCAST", callback_data="send_test_bc")]
+        ])
+    )
+
+async def handle_broadcast_history(client, callback_query):
+    """Show broadcast history"""
+    
+    cur.execute("""
+        SELECT id, target, sent_count, failed_count, timestamp 
+        FROM broadcast_history 
+        ORDER BY id DESC 
+        LIMIT 5
+    """)
+    history = cur.fetchall()
+    
+    if not history:
+        text = "📭 **No broadcast history found!**"
+    else:
+        text = "📋 **Last 5 Broadcasts:**\n\n"
+        for row in history:
+            bc_id, target, sent, failed, timestamp = row
+            total = sent + failed
+            rate = (sent/total*100) if total > 0 else 0
+            text += f"**#{bc_id}** - {target}\n"
+            text += f"✅ {sent} | ❌ {failed} | 📊 {rate:.1f}%\n"
+            text += f"🕒 {timestamp}\n━━━━━━━━━━\n"
+    
+    await callback_query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 BACK", callback_data="bc_back")]
+        ])
+    )
+
+async def handle_broadcast_back(client, callback_query):
+    """Go back to main menu"""
+    
+    await callback_query.message.edit_text(
+        "🏠 **Broadcast System**\n\n"
+        "Available commands:\n"
+        "• `/broadcast [target]` - Send broadcast\n"
+        "• `/testbc` - Add test users\n"
+        "• `/listusers` - View users\n"
+        "• `/listgroups` - View groups\n\n"
+        "**Usage:** Reply to message + `/broadcast pm`",
         reply_markup=InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Yes, Send", callback_data=f"bc_confirm:{target}"),
-                InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel")
-            ],
-            [
-                InlineKeyboardButton("📊 View Stats", callback_data="bc_stats")
+                InlineKeyboardButton("📤 TEST BROADCAST", callback_data="test_broadcast"),
+                InlineKeyboardButton("📋 HISTORY", callback_data="bc_history")
             ]
         ])
     )
+
+async def get_recipients_list(target):
+    """Get list of recipients based on target"""
+    
+    recipients = []
+    
+    if target == "all":
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+        recipients.extend([uid[0] for uid in users])
+        
+        cur.execute("SELECT chat_id FROM groups")
+        groups = cur.fetchall()
+        recipients.extend([gid[0] for gid in groups])
+    
+    elif target == "pm":
+        cur.execute("SELECT user_id FROM users")
+        users = cur.fetchall()
+        recipients.extend([uid[0] for uid in users])
+    
+    elif target == "groups":
+        cur.execute("SELECT chat_id FROM groups")
+        groups = cur.fetchall()
+        recipients.extend([gid[0] for gid in groups])
+    
+    elif target == "support":
+        cur.execute("SELECT DISTINCT user_id FROM contact_history")
+        users = cur.fetchall()
+        recipients.extend([uid[0] for uid in users])
+    
+    # Remove duplicates and invalid IDs
+    recipients = list(set([rid for rid in recipients if rid and rid > 0]))
+    return recipients
+
+# Step 5: TEST BROADCAST COMMAND (Quick fix)
+@app.on_message(filters.command("testbc") & filters.private)
+async def test_broadcast_fixed(client, message):
+    """Test broadcast system"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    # Add test users
+    added = []
+    
+    # Add current user
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (message.from_user.id, message.from_user.first_name))
+    added.append(message.from_user.id)
+    
+    # Add SUPER_ADMIN
+    cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+               (SUPER_ADMIN, "Super Admin"))
+    added.append(SUPER_ADMIN)
+    
+    # Add some dummy users
+    test_users = [
+        (111222333, "Test User 1"),
+        (222333444, "Test User 2"),
+        (333444555, "Test User 3")
+    ]
+    
+    for user_id, name in test_users:
+        cur.execute("INSERT OR IGNORE INTO users (user_id, first_name) VALUES (?, ?)",
+                   (user_id, name))
+        added.append(user_id)
+    
+    conn.commit()
+    
+    # Show test message with button
+    await message.reply_text(
+        f"✅ **Added {len(added)} test users!**\n\n"
+        f"User IDs: {', '.join(map(str, added[:3]))}...\n\n"
+        "**Now you can:**\n"
+        "1. Reply to any message\n"
+        "2. Type `/broadcast pm`\n"
+        "3. Click YES to send\n\n"
+        "Or send a test message now:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 SEND TEST MESSAGE", callback_data="send_test_bc")]
+        ])
+    )
+
+# Step 6: SEND TEST BROADCAST BUTTON HANDLER
+@app.on_callback_query(filters.regex("^send_test_bc$"))
+async def send_test_broadcast(client, callback_query):
+    """Send a test broadcast"""
+    
+    await callback_query.answer("Sending test message...")
+    
+    # Send a test message to yourself
+    try:
+        await client.send_message(
+            callback_query.from_user.id,
+            "📢 **Test Broadcast**\n\n"
+            "This is a test broadcast message!\n"
+            "✅ Broadcast system is working correctly.\n\n"
+            "Now you can use `/broadcast pm` to send to all users."
+        )
+        
+        await callback_query.message.edit_text(
+            "✅ **Test message sent to you!**\n\n"
+            "Check your PM for the test message.\n\n"
+            "**Next step:**\n"
+            "1. Reply to any message\n"
+            "2. Type `/broadcast pm`\n"
+            "3. Confirm and send!"
+        )
+        
+    except Exception as e:
+        await callback_query.message.edit_text(
+            f"❌ **Error:** {str(e)[:100]}"
+        )
+
+# Step 7: SIMPLE LIST COMMANDS
+@app.on_message(filters.command("listusers") & filters.private)
+async def list_users_simple(client, message):
+    """Simple list users command"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    cur.execute("SELECT COUNT(*) FROM users")
+    total = cur.fetchone()[0]
+    
+    if total == 0:
+        await message.reply_text("📭 No users found!\nUse `/testbc` to add test users.")
+        return
+    
+    cur.execute("SELECT user_id, first_name FROM users LIMIT 20")
+    users = cur.fetchall()
+    
+    text = f"👥 **Users in Database ({total} total)**\n\n"
+    for user_id, first_name in users:
+        text += f"• `{user_id}` - {first_name}\n"
+    
+    if total > 20:
+        text += f"\n... and {total-20} more users"
+    
+    await message.reply_text(text)
+
+@app.on_message(filters.command("listgroups") & filters.private)
+async def list_groups_simple(client, message):
+    """Simple list groups command"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    cur.execute("SELECT COUNT(*) FROM groups")
+    total = cur.fetchone()[0]
+    
+    if total == 0:
+        await message.reply_text("📭 No groups found!\nAdd bot to groups to track them.")
+        return
+    
+    cur.execute("SELECT chat_id, title FROM groups LIMIT 10")
+    groups = cur.fetchall()
+    
+    text = f"👥 **Groups in Database ({total} total)**\n\n"
+    for chat_id, title in groups:
+        text += f"• `{chat_id}` - {title}\n"
+    
+    await message.reply_text(text)
+
+
+
+
+# Step 9: CLEANUP FUNCTION (optional)
+async def cleanup_broadcast_sessions():
+    """Clean up old broadcast sessions"""
+    while True:
+        try:
+            current_time = time.time()
+            sessions_to_delete = []
+            
+            for session_id, session_data in list(broadcast_sessions.items()):
+                # Remove sessions older than 1 hour
+                if "created_at" in session_data:
+                    if current_time - session_data["created_at"] > 3600:
+                        sessions_to_delete.append(session_id)
+            
+            for session_id in sessions_to_delete:
+                del broadcast_sessions[session_id]
+            
+            await asyncio.sleep(300)  # Check every 5 minutes
+            
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+            await asyncio.sleep(60)
+
 
 # ================= QUICK ADD BOT USERS =================
 @app.on_message(filters.command("quickadd") & filters.private)
@@ -7076,55 +7639,15 @@ async def start_background_tasks():
     """Start all background tasks"""
     tasks = [
         check_mutes_task(),
-        cleanup_abuse_cache_task(),  # Add this line
+        cleanup_abuse_cache_task(), # Add this line
+        cleanup_broadcast_sessions(),
     ]
     
     for task in tasks:
         asyncio.create_task(task)
 
 # ================= USER & GROUP TRACKING SYSTEM =================
-@app.on_message(filters.private)
-async def track_private_users(client, message):
-    """Track all users who message the bot in PM"""
-    
-    if message.from_user.is_bot:
-        return
-    
-    user_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name
-    
-    # Save user to database
-    cur.execute("""
-        INSERT OR REPLACE INTO users 
-        (user_id, username, first_name, last_name, last_active) 
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, (user_id, username, first_name, last_name))
-    conn.commit()
 
-@app.on_message(filters.group)
-async def track_groups(client, message):
-    """Track all groups where bot is added"""
-    
-    # Only track when bot is mentioned or command used
-    if message.text and (f"@{client.me.username}" in message.text or message.text.startswith("/")):
-        chat_id = message.chat.id
-        title = message.chat.title
-        username = message.chat.username
-        added_by = message.from_user.id if message.from_user else 0
-        
-        # Save group to database
-        cur.execute("""
-            INSERT OR REPLACE INTO groups 
-            (chat_id, title, username, added_by, added_date) 
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (chat_id, title, username, added_by))
-        conn.commit()
-
-
-# ================== RUN ==================
-# ================= MAIN EXECUTION =================
 # ================= MAIN EXECUTION =================
 if __name__ == "__main__":
     print("=" * 50)
