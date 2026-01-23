@@ -6317,26 +6317,28 @@ async def broadcast_back(client, callback_query):
     await broadcast_command(client, callback_query.message)
 
 # ================= USER/GROUP TRACKING =================
-@app.on_message(filters.private & ~filters.command)
+@app.on_message(filters.private & filters.command())
 async def track_user_activity(client, message):
     """Track user activity in database"""
-    
-    if message.from_user.is_bot:
-        return
-    
-    user_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name
-    
-    # Update or insert user
-    cur.execute("""
-        INSERT OR REPLACE INTO users 
-        (user_id, username, first_name, last_name, last_active) 
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, (user_id, username, first_name, last_name))
-    conn.commit()
 
+    if not message.from_user or message.from_user.is_bot:
+        return
+
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    first_name = message.from_user.first_name or ""
+    last_name = message.from_user.last_name or ""
+
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO users 
+        (user_id, username, first_name, last_name, last_active)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (user_id, username, first_name, last_name)
+    )
+    conn.commit()
+    
 @app.on_message(filters.group & filters.command("start"))
 async def track_group_activity(client, message):
     """Track group when bot is added"""
