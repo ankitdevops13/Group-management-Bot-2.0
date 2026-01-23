@@ -6071,46 +6071,6 @@ async def bot_stats_callback(client, callback_query):
     )
 
 # ================= BROADCAST SYSTEM =================
-# ================= USER & GROUP TRACKING SYSTEM =================
-@app.on_message(filters.private)
-async def track_private_users(client, message):
-    """Track all users who message the bot in PM"""
-    
-    if message.from_user.is_bot:
-        return
-    
-    user_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name
-    
-    # Save user to database
-    cur.execute("""
-        INSERT OR REPLACE INTO users 
-        (user_id, username, first_name, last_name, last_active) 
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, (user_id, username, first_name, last_name))
-    conn.commit()
-
-@app.on_message(filters.group)
-async def track_groups(client, message):
-    """Track all groups where bot is added"""
-    
-    # Only track when bot is mentioned or command used
-    if message.text and (f"@{client.me.username}" in message.text or message.text.startswith("/")):
-        chat_id = message.chat.id
-        title = message.chat.title
-        username = message.chat.username
-        added_by = message.from_user.id if message.from_user else 0
-        
-        # Save group to database
-        cur.execute("""
-            INSERT OR REPLACE INTO groups 
-            (chat_id, title, username, added_by, added_date) 
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (chat_id, title, username, added_by))
-        conn.commit()
-
 @app.on_message(filters.command("start") & filters.group)
 async def track_group_on_start(client, message):
     """Track group when /start is used"""
@@ -7121,7 +7081,48 @@ async def start_background_tasks():
     
     for task in tasks:
         asyncio.create_task(task)
+
+# ================= USER & GROUP TRACKING SYSTEM =================
+@app.on_message(filters.private)
+async def track_private_users(client, message):
+    """Track all users who message the bot in PM"""
+    
+    if message.from_user.is_bot:
+        return
+    
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    last_name = message.from_user.last_name
+    
+    # Save user to database
+    cur.execute("""
+        INSERT OR REPLACE INTO users 
+        (user_id, username, first_name, last_name, last_active) 
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (user_id, username, first_name, last_name))
+    conn.commit()
+
+@app.on_message(filters.group)
+async def track_groups(client, message):
+    """Track all groups where bot is added"""
+    
+    # Only track when bot is mentioned or command used
+    if message.text and (f"@{client.me.username}" in message.text or message.text.startswith("/")):
+        chat_id = message.chat.id
+        title = message.chat.title
+        username = message.chat.username
+        added_by = message.from_user.id if message.from_user else 0
         
+        # Save group to database
+        cur.execute("""
+            INSERT OR REPLACE INTO groups 
+            (chat_id, title, username, added_by, added_date) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (chat_id, title, username, added_by))
+        conn.commit()
+
+
 # ================== RUN ==================
 # ================= MAIN EXECUTION =================
 # ================= MAIN EXECUTION =================
