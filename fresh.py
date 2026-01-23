@@ -664,8 +664,14 @@ def remove_mute(chat_id, user_id):
 def contains_abuse(text):
     if not text:
         return False
-    text = re.sub(r"[^a-zA-Z ]", "", text.lower())
-    return any(w in text for w in ABUSE_WORDS)
+
+    text = text.lower()
+    words = re.findall(r"\b\w+\b", text)
+
+    for w in ABUSE_WORDS:
+        if w.lower() in words:
+            return True
+    return False
 
 # ================= FIXED HELPER FUNCTIONS =================
 def is_admin(uid):
@@ -849,7 +855,7 @@ def parse_duration(duration_str: str):
 ABUSE_WORDS = [
     # English abuse words
     "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "pussy",
-    "whore", "slut", "motherfucker", "damn", "hell", "crap", "bullshit",
+    "whore", "slut", "motherfucker", "damn", "crap", "bullshit",
     "nigger", "nigga", "faggot", "retard", "idiot", "moron", "stupid",
     "fool", "dumb", "stupid", "dickhead", "arsehole", "cock", "wanker",
     "twat", "slag", "skank", "hoe", "slutty", "bitchy", "fucking",
