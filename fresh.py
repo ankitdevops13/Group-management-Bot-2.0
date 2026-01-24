@@ -140,12 +140,10 @@ CREATE TABLE IF NOT EXISTS contact_history (
 """)
 
 # First message auto-reply
-cur.execute("""
-CREATE TABLE IF NOT EXISTS auto_reply_sent (
-    user_id INTEGER PRIMARY KEY,
-    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+cur.execute(
+    "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+    (uid,)
 )
-""")
 
 # PM abuse warnings
 cur.execute("""
