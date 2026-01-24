@@ -580,6 +580,13 @@ def abuse_warning(uid):
     conn.commit()
     cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
     return cur.fetchone()[0]
+
+def save_auto_reply(user_id):
+    cur.execute(
+        "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+        (user_id,)
+    )
+    conn.commit()
     
 # ================= ADMIN TYPE CHECKING =================
 async def check_admin_type(client, chat_id, user_id):
@@ -7152,71 +7159,73 @@ async def admin_reply_handler(client, message: Message):
 
 
 # ================= USER HANDLER =================
-# ================= USER HANDLER =================
-
-@app.on_message(filters.private, group=1)
+@app.on_message(filters.private & ~filters.user(INITIAL_ADMINS), group=1)
 async def user_handler(client, message: Message):
 
-    if message.from_user.is_bot:
+    # ---------- BASIC SAFETY ----------
+    if not message.from_user or message.from_user.is_bot:
         return
 
     uid = message.from_user.id
 
-    # ---------- ADMIN CHECK ----------
-    if is_admin(uid):
-        return
-
     # ---------- BLOCK CHECK ----------
-    if is_blocked(uid):
+    cur.execute(
+        "SELECT 1 FROM blocked_users WHERE user_id=?",
+        (uid,)
+    )
+    if cur.fetchone():
         await message.reply_text(
-            footer("🔴 **Access Blocked**\nAap admin dwara block kiye gaye hain.")
+            "🔴 **Access Blocked**\nYou are blocked by admin."
         )
         return
 
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warning(uid)
 
-        if count >= 2:
+        warns = add_pm_abuse_warn(uid)
+
+        if warns >= 2:
             cur.execute(
-                "INSERT OR IGNORE INTO blocked_users VALUES (?)",
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
                 (uid,)
             )
             conn.commit()
 
             await message.reply_text(
-                footer("🔴 **Blocked**\nRepeated abusive language detected.")
+                "🔴 **Blocked**\nRepeated abusive language detected."
             )
             return
         else:
             await message.reply_text(
-                footer("⚠️ **Warning**\nAbusive language detected. Please behave.")
+                "⚠️ **Warning**\nAbusive language detected. Please behave."
             )
             return
 
-    # ---------- AUTO REPLY LOGIC ----------
-    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    # ---------- AUTO REPLY ----------
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (uid,)
+    )
     first_time = not cur.fetchone()
 
     if first_time:
-        # 👉 First message (full reply)
         await message.reply_text(
-            footer(
-                "📨 **Message Received!**\n"
-                "Thanks for contacting us ✨\n"
-                "Our **Ankit Shakya** will reply shortly ⏳"
-            )
+            "📨 **Message Received!**\n"
+            "Thanks for contacting us ✨\n"
+            "Support team will reply shortly ⏳"
         )
-        cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
+        cur.execute(
+            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+            (uid,)
+        )
         conn.commit()
     else:
-        # 👉 Other messages (short reply)
         await message.reply_text(
-            footer("✅ **Message received**")
+            "✅ **Message received**"
         )
 
-    # ---------- FORWARD USER MESSAGE TO ADMINS ----------
+    # ---------- FORWARD TO ADMINS ----------
     cur.execute("SELECT admin_id FROM admins")
     admins = cur.fetchall()
 
@@ -7224,7 +7233,7 @@ async def user_handler(client, message: Message):
         "📩 **New User Message**\n\n"
         f"👤 Name: {message.from_user.first_name}\n"
         f"🆔 ID: `{uid}`\n"
-        f"👤 Username: @{message.from_user.username or 'None'}"
+        f"👤 Username: @{message.from_user.username or 'None'}\n\n"
     )
 
     for (aid,) in admins:
@@ -7232,19 +7241,17 @@ async def user_handler(client, message: Message):
             if message.text:
                 await client.send_message(
                     aid,
-                    f"{header}\n\n💬 {message.text}",
-                    reply_markup=admin_buttons(uid)
+                    f"{header}💬 {message.text}",
+                    reply_markup=admin_button(uid)
                 )
             else:
                 await message.copy(
                     aid,
                     caption=header,
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=admin_button(uid)
                 )
-        except:
+        except Exception:
             continue
-
-
 
 @app.on_message(filters.group & filters.text, group=3)
 async def admin_abuse_delete_handler(client, message: Message):
