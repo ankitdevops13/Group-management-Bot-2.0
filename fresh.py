@@ -73,35 +73,30 @@ app = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
+
+
+
+
 # ======================================================
-# ================= DATABASE SETUP ======================
+# ============== MERGED DATABASE SETUP =================
+# (main.py + fresh.py)
 # ======================================================
 
+import sqlite3
 
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cur = conn.cursor()
 
-
-
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS cooldown (
-    user_id INTEGER PRIMARY KEY,
-    last_used INTEGER
-)
-""")
-
-
 # ======================================================
-# ================== BOT ADMINS ========================
+# ================= ADMINS =============================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admins (
     admin_id INTEGER PRIMARY KEY
 )
 """)
 
-# Super admin (safe insert)
 cur.execute(
     "INSERT OR IGNORE INTO admins (admin_id) VALUES (?)",
     (SUPER_ADMIN,)
@@ -109,55 +104,62 @@ cur.execute(
 
 # ======================================================
 # ================= BLOCKED USERS ======================
-# (PM support block)
+# (PM + global block)
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS blocked_users (
-    user_id INTEGER PRIMARY KEY
+    user_id INTEGER PRIMARY KEY,
+    blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
 # ======================================================
-# ================= SUPPORT CHAT HISTORY ===============
-# (User ↔ Admin messages)
+# ================= USER SUPPORT SYSTEM ================
 # ======================================================
+
+# Admin reply routing
+cur.execute("""
+CREATE TABLE IF NOT EXISTS admin_reply_target (
+    admin_id INTEGER PRIMARY KEY,
+    user_id INTEGER,
+    set_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+# User ↔ Admin chat history
 cur.execute("""
 CREATE TABLE IF NOT EXISTS contact_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    sender TEXT,              -- 'user' / 'admin'
-    message_type TEXT,        -- 'text' / 'media'
+    sender TEXT CHECK(sender IN ('user','admin')),
+    message_type TEXT,
     content TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
-# ======================================================
-# ================= AUTO REPLY TRACKER =================
-# (First PM auto-reply)
-# ======================================================
+# First message auto-reply
 cur.execute("""
 CREATE TABLE IF NOT EXISTS auto_reply_sent (
-    user_id INTEGER PRIMARY KEY
+    user_id INTEGER PRIMARY KEY,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+# PM abuse warnings
+cur.execute("""
+CREATE TABLE IF NOT EXISTS pm_abuse_warns (
+    user_id INTEGER PRIMARY KEY,
+    warns INTEGER DEFAULT 0,
+    last_warn DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
 # ======================================================
-# ================= ADMIN REPLY MODE ===================
-# (Inline support reply target)
+# ================= GROUP ABUSE SYSTEM =================
 # ======================================================
-cur.execute("CREATE TABLE IF NOT EXISTS auto_reply_sent (user_id INTEGER PRIMARY KEY)")
-cur.execute("CREATE TABLE IF NOT EXISTS abuse_warnings (user_id INTEGER PRIMARY KEY, count INTEGER)")
-cur.execute("""
-CREATE TABLE IF NOT EXISTS admin_reply_target (
-    admin_id INTEGER PRIMARY KEY,
-    user_id INTEGER
-)
-""")
-# ======================================================
-# ================= ABUSE / WARN SYSTEM ================
-# (GROUP-WISE — ACTIVE TABLE)
-# ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS abuse_warns (
     chat_id INTEGER,
@@ -169,8 +171,8 @@ CREATE TABLE IF NOT EXISTS abuse_warns (
 
 # ======================================================
 # ================= MUTE SCHEDULER =====================
-# (Auto-unmute)
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS mutes (
     chat_id INTEGER,
@@ -183,6 +185,7 @@ CREATE TABLE IF NOT EXISTS mutes (
 # ======================================================
 # ================= GROUP RULES ========================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS group_rules (
     chat_id INTEGER PRIMARY KEY,
@@ -193,6 +196,7 @@ CREATE TABLE IF NOT EXISTS group_rules (
 # ======================================================
 # ================= WELCOME MESSAGES ===================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS welcome_messages (
     chat_id INTEGER PRIMARY KEY,
@@ -203,6 +207,7 @@ CREATE TABLE IF NOT EXISTS welcome_messages (
 # ======================================================
 # ================= USER REPORT SYSTEM =================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS user_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,7 +215,7 @@ CREATE TABLE IF NOT EXISTS user_reports (
     reporter_id INTEGER,
     reported_user_id INTEGER,
     reason TEXT,
-    status TEXT DEFAULT 'pending',   -- pending / resolved / rejected
+    status TEXT DEFAULT 'pending',
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     resolved_by INTEGER,
     resolved_at DATETIME
@@ -226,12 +231,33 @@ CREATE TABLE IF NOT EXISTS report_cooldown (
 )
 """)
 
+# ======================================================
+# ================= TAG / PING SYSTEM ==================
+# ======================================================
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS tag_cooldown (
     chat_id INTEGER,
     user_id INTEGER,
-    last_tag INTEGER,
+    last_time INTEGER,
+    PRIMARY KEY (chat_id, user_id)
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS tag_cancel (
+    chat_id INTEGER,
+    admin_id INTEGER,
+    cancelled INTEGER DEFAULT 0,
+    PRIMARY KEY (chat_id, admin_id)
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS admin_ping_cooldown (
+    chat_id INTEGER,
+    user_id INTEGER,
+    last_ping INTEGER,
     PRIMARY KEY (chat_id, user_id)
 )
 """)
@@ -239,6 +265,7 @@ CREATE TABLE IF NOT EXISTS tag_cooldown (
 # ======================================================
 # ================= REMINDERS ==========================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,6 +280,7 @@ CREATE TABLE IF NOT EXISTS reminders (
 # ======================================================
 # ================= MASS DELETE CONFIRM ================
 # ======================================================
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS mass_delete_pending (
     chat_id INTEGER,
@@ -263,39 +291,9 @@ CREATE TABLE IF NOT EXISTS mass_delete_pending (
 )
 """)
 
-# =========================== admin mention ==========================================
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS admin_ping_cooldown (
-    chat_id INTEGER,
-    user_id INTEGER,
-    last_ping INTEGER,
-    PRIMARY KEY (chat_id, user_id)
-)
-""")
-conn.commit()
-
-
 # ======================================================
-# Tag cooldown
-cur.execute("""
-CREATE TABLE IF NOT EXISTS tag_cooldown (
-    chat_id INTEGER,
-    user_id INTEGER,
-    last_time INTEGER,
-    PRIMARY KEY (chat_id, user_id)
-)
-""")
-
-# Tag cancel
-cur.execute("""
-CREATE TABLE IF NOT EXISTS tag_cancel (
-    chat_id INTEGER,
-    admin_id INTEGER,
-    cancelled INTEGER DEFAULT 0,
-    PRIMARY KEY (chat_id, admin_id)
-)
-""")
+# ================= COOLDOWNS ==========================
+# ======================================================
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS cooldown (
@@ -304,37 +302,40 @@ CREATE TABLE IF NOT EXISTS cooldown (
 )
 """)
 
+# ======================================================
 # ================= INDEXES =============================
 # ======================================================
+
 cur.execute("""
 CREATE INDEX IF NOT EXISTS idx_admins
 ON admins(admin_id)
 """)
 
+cur.execute("""
+CREATE INDEX IF NOT EXISTS idx_history_user
+ON contact_history(user_id)
+""")
 
 cur.execute("""
 CREATE INDEX IF NOT EXISTS idx_reports
 ON user_reports(chat_id, status)
 """)
 
-# ================= INSERT INITIAL ADMINS =================
+cur.execute("""
+CREATE INDEX IF NOT EXISTS idx_reply_target
+ON admin_reply_target(admin_id)
+""")
+# ======================================================
+# ================= INITIAL ADMINS =====================
+# ======================================================
+
 for admin_id in INITIAL_ADMINS:
     cur.execute(
         "INSERT OR IGNORE INTO admins (admin_id) VALUES (?)",
         (admin_id,)
     )
 
-
-# ================= ABUSE WARNINGS TABLE =================
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS pm_abuse_warns (
-    user_id INTEGER PRIMARY KEY,
-    warns INTEGER DEFAULT 0
-)
-""")
-# ================= INDEX (FAST LOOKUP) =================
-
+conn.commit()
 
 # ================= INITIALIZE WITH SAMPLE DATA =================
 def init_broadcast_tables():
@@ -510,33 +511,32 @@ def get_uptime() -> str:
         return "Unknown"
       
 # ================= FIXED ABUSE WARNING FUNCTION =================
-# Remove the duplicate abuse_warning functions and use this unified version:
-def abuse_warnings(chat_id, user_id):
-    """Add abuse warning for user in chat"""
-    cur.execute(
-        "INSERT OR IGNORE INTO abuse_warnings (chat_id, user_id, warns) VALUES (?, ?, 0)",
-        (chat_id, user_id)
-    )
-    cur.execute(
-        "UPDATE abuse_warnings SET warns = warns + 1 WHERE chat_id=? AND user_id=?",
-        (chat_id, user_id)
-    )
-    conn.commit()
-    cur.execute(
-        "SELECT warns FROM abuse_warnings WHERE chat_id=? AND user_id=?",
-        (chat_id, user_id)
-    )
-    return cur.fetchone()[0]
+def add_pm_abuse_warn(user_id: int) -> int:
+    """
+    PM abuse warning add karta hai
+    Returns: total warns count
+    """
 
-def abuse_warning(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
+    # create row if not exists
+    cur.execute(
+        "INSERT OR IGNORE INTO pm_abuse_warns (user_id, warns) VALUES (?, 0)",
+        (user_id,)
+    )
+
+    # increment warning
+    cur.execute(
+        """
+        UPDATE pm_abuse_warns
+        SET warns = warns + 1,
+            last_warn = CURRENT_TIMESTAMP
+        WHERE user_id = ?
+        """,
+        (user_id,)
+    )
+
     conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
-    return cur.fetchone()[0]
-    
-# ===================== helpers 
-def get_pm_warn(user_id):
+
+    # fetch updated count
     cur.execute(
         "SELECT warns FROM pm_abuse_warns WHERE user_id=?",
         (user_id,)
@@ -544,19 +544,31 @@ def get_pm_warn(user_id):
     row = cur.fetchone()
     return row[0] if row else 0
 
+def is_blocked_user(user_id: int) -> bool:
+    cur.execute(
+        "SELECT 1 FROM blocked_users WHERE user_id=?",
+        (user_id,)
+    )
+    return cur.fetchone() is not None
 
-def add_pm_warn(user_id):
-    cur.execute(
-        "INSERT OR IGNORE INTO pm_abuse_warns (user_id, warns) VALUES (?, 0)",
-        (user_id,)
-    )
-    cur.execute(
-        "UPDATE pm_abuse_warns SET warns = warns + 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    return get_pm_warn(user_id)
-    
+def auto_block_if_needed(user_id: int, limit: int = 2) -> bool:
+    """
+    Returns True if user got blocked
+    """
+    warns = add_pm_abuse_warn(user_id)
+
+    if warns >= limit:
+        cur.execute(
+            "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+            (user_id,)
+        )
+        conn.commit()
+        return True
+
+    return False
+
+
+
 # ================= ADMIN TYPE CHECKING =================
 async def check_admin_type(client, chat_id, user_id):
     """
@@ -7061,157 +7073,138 @@ def footer(text):
 ━━━━━━━━━━━━━━━━━━"""
 
 # ================= USER HANDLER =================
-@app.on_message(filters.private, group=1)
+@app.on_message(filters.private & ~filters.user(INITIAL_ADMINS), group=1)
 async def user_handler(client, message: Message):
-    if message.from_user.is_bot:
+
+    # safety checks
+    if not message.from_user or message.from_user.is_bot:
         return
 
     uid = message.from_user.id
 
-    # ---------- ADMIN CHECK ----------
-    if is_admin(uid):
-        return
-
-    # ---------- BLOCK CHECK ----------
-    if is_blocked(uid):
+    # ---------------- BLOCK CHECK ----------------
+    cur.execute(
+        "SELECT 1 FROM blocked_users WHERE user_id=?",
+        (uid,)
+    )
+    if cur.fetchone():
         await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
-            "🔴 **Access Blocked**\n"
-            "Aap admin dwara block kiye gaye hain."
-            + beautiful_footer()
+            "🔴 **Access Blocked**\nYou are blocked by admin."
         )
         return
 
-    # ---------- ABUSE CHECK ----------
+    # ---------------- ABUSE CHECK ----------------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warning(uid)
 
-        if count >= 2:
+        warns = add_pm_abuse_warn(uid)
+
+        if warns >= 2:
             cur.execute(
-                "INSERT OR IGNORE INTO blocked_users VALUES (?)",
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
                 (uid,)
             )
             conn.commit()
 
             await message.reply_text(
-                f"{beautiful_header('support')}\n\n"
-                "🔴 **Blocked**\n"
-                "Repeated abusive language detected."
-                + beautiful_footer()
+                "🔴 **Blocked**\nRepeated abusive language detected."
             )
             return
         else:
             await message.reply_text(
-                f"{beautiful_header('support')}\n\n"
-                "⚠️ **Warning**\n"
-                "Abusive language detected. Please behave."
-                + beautiful_footer()
+                "⚠️ **Warning**\nAbusive language detected. Please behave."
             )
             return
 
-    # ---------- AUTO REPLY LOGIC ----------
-    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    # ---------------- AUTO REPLY ----------------
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (uid,)
+    )
     first_time = not cur.fetchone()
 
     if first_time:
         await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
             "📨 **Message Received!**\n"
             "Thanks for contacting us ✨\n"
-            "Our **Ankit Shakya** will reply shortly ⏳"
-            + beautiful_footer()
+            "Support team will reply shortly ⏳"
         )
-        cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
+        cur.execute(
+            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+            (uid,)
+        )
         conn.commit()
     else:
         await message.reply_text(
-            f"{beautiful_header('support')}\n\n"
             "✅ **Message received**"
-            + beautiful_footer()
         )
 
-    # ---------- FORWARD USER MESSAGE TO ADMINS ----------
+    # ---------------- FORWARD TO ADMINS ----------------
     cur.execute("SELECT admin_id FROM admins")
     admins = cur.fetchall()
 
-    header = f"""
-{beautiful_header('support')}
-
-📩 **New User Message**
-
-👤 **Name:** {message.from_user.first_name}
-🆔 **ID:** `{uid}`
-📛 **Username:** @{message.from_user.username or 'None'}
-    """
+    header = (
+        "📩 **New User Message**\n\n"
+        f"👤 Name: {message.from_user.first_name}\n"
+        f"🆔 ID: `{uid}`\n"
+        f"👤 Username: @{message.from_user.username or 'None'}\n\n"
+    )
 
     for (aid,) in admins:
         try:
             if message.text:
                 await client.send_message(
                     aid,
-                    f"{header}\n\n💬 **Message:** {message.text}",
-                    reply_markup=admin_buttons(uid)
+                    f"{header}💬 {message.text}",
+                    reply_markup=admin_button(uid)
                 )
             else:
                 await message.copy(
                     aid,
                     caption=header,
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=admin_button(uid)
                 )
-        except:
+        except Exception:
             continue
 
+    
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
-@app.on_message(filters.private, group=0)
+@app.on_message(filters.private & filters.user(INITIAL_ADMINS), group=0)
 async def admin_reply_handler(client, message: Message):
 
-    # ❌ Bot ke apne messages ignore
-    if message.from_user.is_bot:
+    # safety
+    if not message.from_user or message.from_user.is_bot:
         return
 
     admin_id = message.from_user.id
 
-    # ❌ Agar admin nahi hai → ignore
-    if not is_admin(admin_id):
-        return
-
-    # ✅ Check: reply mode ON hai ya nahi
+    # ---------------- REPLY MODE CHECK ----------------
     cur.execute(
         "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
         (admin_id,)
     )
     row = cur.fetchone()
 
-    # ❌ Reply mode OFF → normal admin chat
+    # reply mode OFF → normal admin chat
     if not row:
         return
 
     user_id = row[0]
 
-    # 🔴 IMPORTANT: pehle hi reply mode clear karo
-    # (warna loop / echo ban jata hai)
-    cur.execute(
-        "DELETE FROM admin_reply_target WHERE admin_id=?",
-        (admin_id,)
-    )
-    conn.commit()
-
     try:
-        # ---------- SEND MESSAGE ----------
+        # ---------------- SEND TO USER ----------------
         if message.text:
-            # TEXT
             await client.send_message(
                 user_id,
-                footer(f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}")
+                message.text
             )
             mtype, content = "text", message.text
         else:
-            # ALL MEDIA (photo, video, doc, audio, voice, sticker, gif…)
+            # all media supported
             await message.copy(user_id)
             mtype, content = "media", "MEDIA"
 
-        # ---------- SAVE HISTORY ----------
+        # ---------------- SAVE HISTORY ----------------
         cur.execute(
             """
             INSERT INTO contact_history
@@ -7220,13 +7213,18 @@ async def admin_reply_handler(client, message: Message):
             """,
             (user_id, "admin", mtype, content)
         )
+
+        # ---------------- CLEAR REPLY MODE ----------------
+        cur.execute(
+            "DELETE FROM admin_reply_target WHERE admin_id=?",
+            (admin_id,)
+        )
         conn.commit()
 
         await message.reply_text("✅ Reply sent to user")
 
     except Exception as e:
         await message.reply_text(f"❌ Failed to send reply\n`{e}`")
-        
 
 # ================= REPLY BUTTON =================
 @app.on_callback_query(filters.regex("^reply:"))
@@ -7654,8 +7652,7 @@ if __name__ == "__main__":
     print("3. Then reply to message + `/broadcast pm`")
     print("=" * 50)
     
-    # Run bot
-    print("🚀 Starting bot...")
+    
     
     
     # Create event loop
