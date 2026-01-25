@@ -7284,7 +7284,7 @@ async def check_mutes_task():
 
 
 # ================= INLINE BUTTONS =================
-def admin_buttons(uid):
+def reply_buttons(uid):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🟢 Reply", callback_data=f"reply_{uid}"),
@@ -7402,13 +7402,13 @@ async def user_handler(client, message: Message):
                 await client.send_message(
                     aid,
                     f"{header}\n\n💬 {message.text}",
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=reply_buttons(uid)
                 )
             else:
                 await message.copy(
                     aid,
                     caption=header,
-                    reply_markup=admin_buttons(uid)
+                    reply_markup=reply_buttons(uid)
                 )
         except:
             continue
