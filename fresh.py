@@ -7287,15 +7287,14 @@ async def check_mutes_task():
 def admin_buttons(uid):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🟢 Reply", callback_data=f"reply:{uid}"),
-            InlineKeyboardButton("🚫 Block", callback_data=f"block:{uid}")
+            InlineKeyboardButton("🟢 Reply", callback_data=f"reply_{uid}"),
+            InlineKeyboardButton("🚫 Block", callback_data=f"block_{uid}")
         ],
         [
-            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock:{uid}"),
-            InlineKeyboardButton("📜 History", callback_data=f"history:{uid}")
+            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock_{uid}"),
+            InlineKeyboardButton("📜 History", callback_data=f"history_{uid}")
         ]
     ])
-
 @app.on_callback_query(filters.regex("^contact_support$"))
 async def contact_support_cb(client, cq):
     await cq.answer()
@@ -7520,47 +7519,69 @@ async def cb_reply(client, cq):
     await cq.answer("Reply mode enabled ✅")
 
 # ================= BLOCK / UNBLOCK / HISTORY =================
-@app.on_callback_query(filters.regex("^block:"))
-async def cb_block(client, cq):
-    user_id = int(cq.data.split(":")[1])
-    cur.execute("INSERT OR IGNORE INTO blocked_users VALUES (?)", (user_id,))
-    conn.commit()
-    try:
-        await client.send_message(user_id, footer("🔴 **You are blocked by admin.**"))
-    except:
-        pass
-    await cq.answer("Blocked")
 
-@app.on_callback_query(filters.regex("^unblock:"))
-async def cb_unblock(client, cq):
-    user_id = int(cq.data.split(":")[1])
-    cur.execute("DELETE FROM blocked_users WHERE user_id=?", (user_id,))
-    cur.execute("DELETE FROM abuse_warnings WHERE user_id=?", (user_id,))
-    cur.execute("DELETE FROM auto_reply_sent WHERE user_id=?", (user_id,))
-    conn.commit()
-    try:
-        await client.send_message(user_id, footer("✅ **You are unblocked now.**"))
-    except:
-        pass
-    await cq.answer("Unblocked")
+@app.on_callback_query(filters.regex(r"^reply_(\d+)$"), group=0)
+async def reply_cb(client, cq):
+    uid = int(cq.matches[0].group(1))
+    admin_id = cq.from_user.id
 
-@app.on_callback_query(filters.regex("^history:"))
-async def cb_history(client, cq):
-    user_id = int(cq.data.split(":")[1])
-    cur.execute("""
-        SELECT sender,message_type,content,timestamp
-        FROM contact_history
-        WHERE user_id=?
-        ORDER BY id DESC LIMIT 5
-    """, (user_id,))
+    if not is_admin(admin_id):
+        return await cq.answer("Not allowed", show_alert=True)
+
+    cur.execute(
+        "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
+        (admin_id, uid)
+    )
+    conn.commit()
+
+    await cq.answer("Reply mode ON")
+    await cq.message.reply_text("✏️ Reply mode ON. Ab message bhejo.")
+
+@app.on_callback_query(filters.regex(r"^block_(\d+)$"), group=0)
+async def block_cb(client, cq):
+    uid = int(cq.matches[0].group(1))
+
+    cur.execute(
+        "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+        (uid,)
+    )
+    conn.commit()
+
+    await cq.answer("User blocked")
+    await cq.message.reply_text("🚫 User blocked successfully.")
+
+@app.on_callback_query(filters.regex(r"^unblock_(\d+)$"), group=0)
+async def unblock_cb(client, cq):
+    uid = int(cq.matches[0].group(1))
+
+    cur.execute("DELETE FROM blocked_users WHERE user_id=?", (uid,))
+    cur.execute("DELETE FROM pm_abuse_warns WHERE user_id=?", (uid,))
+    conn.commit()
+
+    await cq.answer("User unblocked")
+    await cq.message.reply_text("🔓 User unblocked.")
+
+@app.on_callback_query(filters.regex(r"^history_(\d+)$"), group=0)
+async def history_cb(client, cq):
+    uid = int(cq.matches[0].group(1))
+
+    cur.execute(
+        "SELECT sender, content, timestamp "
+        "FROM contact_history WHERE user_id=? "
+        "ORDER BY id DESC LIMIT 5",
+        (uid,)
+    )
     rows = cur.fetchall()
 
-    text = f"📜 **History ({user_id})**\n\n"
-    for s,t,c,ts in rows:
-        text += f"🕒 {ts}\n{s.upper()} | {t}\n{c}\n———\n"
+    if not rows:
+        return await cq.answer("No history", show_alert=True)
 
-    await cq.message.reply_text(text[:3900])
+    text = "📜 **Last Messages**\n\n"
+    for sender, content, ts in rows:
+        text += f"• **{sender}**: {content}\n"
+
     await cq.answer()
+    await cq.message.reply_text(text)
 
 
 # ================= ADMIN ADD / REMOVE =================
