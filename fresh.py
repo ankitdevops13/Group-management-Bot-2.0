@@ -535,12 +535,6 @@ def add_pm_abuse_warn(user_id: int) -> int:
     row = cur.fetchone()
     return row[0] if row else 0
 
-def is_blocked_user(user_id: int) -> bool:
-    cur.execute(
-        "SELECT 1 FROM blocked_users WHERE user_id=?",
-        (user_id,)
-    )
-    return cur.fetchone() is not None
 
 def auto_block_if_needed(user_id: int, limit: int = 2) -> bool:
     """
@@ -559,20 +553,10 @@ def auto_block_if_needed(user_id: int, limit: int = 2) -> bool:
     return False
 
 
-def is_blocked(uid):
-    cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
-    return cur.fetchone() is not None
-
 def contains_abuse(text):
     text = re.sub(r"[^a-zA-Z ]", "", text.lower())
     return any(w in text for w in ABUSE_WORDS)
 
-def abuse_warning(uid):
-    cur.execute("INSERT OR IGNORE INTO abuse_warnings VALUES (?,0)", (uid,))
-    cur.execute("UPDATE abuse_warnings SET count=count+1 WHERE user_id=?", (uid,))
-    conn.commit()
-    cur.execute("SELECT count FROM abuse_warnings WHERE user_id=?", (uid,))
-    return cur.fetchone()[0]
 
 def save_auto_reply(user_id):
     cur.execute(
@@ -704,10 +688,54 @@ def is_super_admin(uid):
     """Check if user is super admin"""
     return uid == SUPER_ADMIN
 
-def is_blocked_user(uid):
-    """Check if user is blocked from support"""
-    cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
+def is_blocked_user(user_id: int) -> bool:
+    cur.execute(
+        "SELECT 1 FROM blocked_users WHERE user_id=?",
+        (user_id,)
+    )
     return cur.fetchone() is not None
+
+def abuse_warning(user_id: int) -> int:
+    """
+    PM abuse warning system
+    Returns total warning count for the user
+    """
+
+    # row create if not exists
+    cur.execute(
+        "INSERT OR IGNORE INTO pm_abuse_warns (user_id, warns) VALUES (?, 0)",
+        (user_id,)
+    )
+
+    # increment warn count
+    cur.execute(
+        """
+        UPDATE pm_abuse_warns
+        SET warns = warns + 1,
+            last_warn = CURRENT_TIMESTAMP
+        WHERE user_id = ?
+        """,
+        (user_id,)
+    )
+
+    conn.commit()
+
+    # fetch updated count
+    cur.execute(
+        "SELECT warns FROM pm_abuse_warns WHERE user_id=?",
+        (user_id,)
+    )
+    row = cur.fetchone()
+
+    return row[0] if row else 0
+
+
+def reset_abuse_warn(user_id: int):
+    cur.execute(
+        "DELETE FROM pm_abuse_warns WHERE user_id=?",
+        (user_id,)
+    )
+    conn.commit()
 
 def is_blocked(uid):
     cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (uid,))
@@ -7284,17 +7312,19 @@ async def check_mutes_task():
 
 
 # ================= INLINE BUTTONS =================
-def reply_buttons(uid):
+def reply_buttons(user_id):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🟢 Reply", callback_data=f"reply_{uid}"),
-            InlineKeyboardButton("🚫 Block", callback_data=f"block_{uid}")
+            InlineKeyboardButton("🟢 Reply", callback_data=f"reply_{user_id}"),
+            InlineKeyboardButton("🚫 Block", callback_data=f"block_{user_id}")
         ],
         [
-            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock_{uid}"),
-            InlineKeyboardButton("📜 History", callback_data=f"history_{uid}")
+            InlineKeyboardButton("🔓 Unblock", callback_data=f"unblock_{user_id}"),
+            InlineKeyboardButton("📜 History", callback_data=f"history_{user_id}")
         ]
     ])
+
+
 @app.on_callback_query(filters.regex("^contact_support$"))
 async def contact_support_cb(client, cq):
     await cq.answer()
@@ -7326,17 +7356,17 @@ async def rules_cb(client, cq):
 @app.on_message(filters.private, group=1)
 async def user_handler(client, message: Message):
 
-    if message.from_user.is_bot:
+    if not message.from_user or message.from_user.is_bot:
         return
 
-    uid = message.from_user.id
+    user_id = message.from_user.id
 
     # ---------- ADMIN CHECK ----------
-    if is_admin(uid):
+    if is_bot_admin(user_id):
         return
 
     # ---------- BLOCK CHECK ----------
-    if is_blocked(uid):
+    if is_blocked_user(user_id):
         await message.reply_text(
             footer("🔴 **Access Blocked**\nAap admin dwara block kiye gaye hain.")
         )
@@ -7345,12 +7375,13 @@ async def user_handler(client, message: Message):
     # ---------- ABUSE CHECK ----------
     abuse_text = message.text or message.caption
     if abuse_text and contains_abuse(abuse_text):
-        count = abuse_warning(uid)
+
+        count = abuse_warning(user_id)
 
         if count >= 2:
             cur.execute(
-                "INSERT OR IGNORE INTO blocked_users VALUES (?)",
-                (uid,)
+                "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
+                (user_id,)
             )
             conn.commit()
 
@@ -7365,11 +7396,13 @@ async def user_handler(client, message: Message):
             return
 
     # ---------- AUTO REPLY LOGIC ----------
-    cur.execute("SELECT 1 FROM auto_reply_sent WHERE user_id=?", (uid,))
+    cur.execute(
+        "SELECT 1 FROM auto_reply_sent WHERE user_id=?",
+        (user_id,)
+    )
     first_time = not cur.fetchone()
 
     if first_time:
-        # 👉 First message (full reply)
         await message.reply_text(
             footer(
                 "📨 **Message Received!**\n"
@@ -7377,22 +7410,24 @@ async def user_handler(client, message: Message):
                 "Our **Ankit Shakya** will reply shortly ⏳"
             )
         )
-        cur.execute("INSERT INTO auto_reply_sent VALUES (?)", (uid,))
+        cur.execute(
+            "INSERT OR IGNORE INTO auto_reply_sent (user_id) VALUES (?)",
+            (user_id,)
+        )
         conn.commit()
     else:
-        # 👉 Other messages (short reply)
         await message.reply_text(
             footer("✅ **Message received**")
         )
 
-    # ---------- FORWARD USER MESSAGE TO ADMINS ----------
+    # ---------- FORWARD TO ADMINS ----------
     cur.execute("SELECT admin_id FROM admins")
     admins = cur.fetchall()
 
     header = (
         "📩 **New User Message**\n\n"
         f"👤 Name: {message.from_user.first_name}\n"
-        f"🆔 ID: `{uid}`\n"
+        f"🆔 ID: `{user_id}`\n"
         f"👤 Username: @{message.from_user.username or 'None'}"
     )
 
@@ -7402,46 +7437,41 @@ async def user_handler(client, message: Message):
                 await client.send_message(
                     aid,
                     f"{header}\n\n💬 {message.text}",
-                    reply_markup=reply_buttons(uid)
+                    reply_markup=reply_buttons(user_id)
                 )
             else:
                 await message.copy(
                     aid,
                     caption=header,
-                    reply_markup=reply_buttons(uid)
+                    reply_markup=reply_buttons(user_id)
                 )
-        except:
+        except Exception:
             continue
+
 
 # ================= ADMIN REPLY (TEXT + ALL MEDIA) =================
 @app.on_message(filters.private, group=0)
 async def admin_reply_handler(client, message: Message):
 
-    # ❌ Bot ke apne messages ignore
-    if message.from_user.is_bot:
+    if not message.from_user or message.from_user.is_bot:
         return
 
     admin_id = message.from_user.id
 
-    # ❌ Agar admin nahi hai → ignore
-    if not is_admin(admin_id):
+    if not is_bot_admin(admin_id):
         return
 
-    # ✅ Check: reply mode ON hai ya nahi
     cur.execute(
         "SELECT user_id FROM admin_reply_target WHERE admin_id=?",
         (admin_id,)
     )
     row = cur.fetchone()
 
-    # ❌ Reply mode OFF → normal admin chat
     if not row:
         return
 
     user_id = row[0]
 
-    # 🔴 IMPORTANT: pehle hi reply mode clear karo
-    # (warna loop / echo ban jata hai)
     cur.execute(
         "DELETE FROM admin_reply_target WHERE admin_id=?",
         (admin_id,)
@@ -7449,20 +7479,16 @@ async def admin_reply_handler(client, message: Message):
     conn.commit()
 
     try:
-        # ---------- SEND MESSAGE ----------
         if message.text:
-            # TEXT
             await client.send_message(
                 user_id,
                 footer(f"**╭── 👨‍💼 SUPPORT REPLY ──╮**\n\n{message.text}")
             )
             mtype, content = "text", message.text
         else:
-            # ALL MEDIA (photo, video, doc, audio, voice, sticker, gif…)
             await message.copy(user_id)
             mtype, content = "media", "MEDIA"
 
-        # ---------- SAVE HISTORY ----------
         cur.execute(
             """
             INSERT INTO contact_history
@@ -7489,7 +7515,7 @@ async def cb_reply(client, cq):
     admin_id = cq.from_user.id
 
     # ❌ Agar admin nahi hai → block
-    if not is_admin(admin_id):
+    if not is_bot_admin(admin_id):
         await cq.answer("Not allowed", show_alert=True)
         return
 
@@ -7530,7 +7556,7 @@ async def reply_cb(client, cq):
 
     cur.execute(
         "INSERT OR REPLACE INTO admin_reply_target (admin_id, user_id) VALUES (?, ?)",
-        (admin_id, uid)
+        (admin_id, user_id)
     )
     conn.commit()
 
@@ -7543,7 +7569,7 @@ async def block_cb(client, cq):
 
     cur.execute(
         "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)",
-        (uid,)
+        (user_id,)
     )
     conn.commit()
 
@@ -7554,8 +7580,8 @@ async def block_cb(client, cq):
 async def unblock_cb(client, cq):
     uid = int(cq.matches[0].group(1))
 
-    cur.execute("DELETE FROM blocked_users WHERE user_id=?", (uid,))
-    cur.execute("DELETE FROM pm_abuse_warns WHERE user_id=?", (uid,))
+    cur.execute("DELETE FROM blocked_users WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM pm_abuse_warns WHERE user_id=?", (user_id,))
     conn.commit()
 
     await cq.answer("User unblocked")
@@ -7569,7 +7595,7 @@ async def history_cb(client, cq):
         "SELECT sender, content, timestamp "
         "FROM contact_history WHERE user_id=? "
         "ORDER BY id DESC LIMIT 5",
-        (uid,)
+        (user_id,)
     )
     rows = cur.fetchall()
 
