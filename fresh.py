@@ -4257,6 +4257,46 @@ ADMIN_KEYWORDS = [
     "help", "support", "mod", "moderator"
 ]
 
+
+
+def contains_admin_keyword(text: str) -> str | None:
+    if not text:
+        return None
+
+    clean = re.sub(r"[^a-zA-Z ]", "", text.lower())
+    for kw in ADMIN_KEYWORDS:
+        if kw in clean:
+            return kw
+    return None
+
+
+@app.on_message(filters.group & (filters.text | filters.caption), group=2)
+async def group_keyword_alert(client, message):
+
+    text = message.text or message.caption
+    matched = contains_admin_keyword(text)
+
+    if not matched:
+        return
+
+    cur.execute("SELECT admin_id FROM admins")
+    admins = cur.fetchall()
+
+    alert = (
+        "🚨 **ADMIN REPORTS ALERT**\n\n"
+        f"🏡 Group: {message.chat.title}\n"
+        f"👤 User: {message.from_user.mention}\n"
+        f"🔑 Keyword: **{matched}**\n\n"
+        f"💬 Message:\n{text[:1500]}"
+    )
+
+    for (aid,) in admins:
+        try:
+            await client.send_message(aid, alert)
+        except:
+            pass
+
+
 # ================= WELCOME MESSAGE SETTING =================
 @app.on_message(filters.command("setwelcome") & filters.group)
 async def set_welcome_message(client, message: Message):
