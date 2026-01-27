@@ -11,9 +11,17 @@ from datetime import datetime, timedelta, timezone
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 from pyrogram.enums import ChatAction, ChatMemberStatus
-from pyrogram.errors import PeerIdInvalid
+
+from pyrogram.errors import (
+    ChatWriteForbidden,
+    UserNotParticipant,
+    FloodWait,
+    PeerIdInvalid,
+    MessageNotModified,
+    MessageDeleteForbidden
+)
 from pyrogram.enums import ChatAction, ChatMemberStatus
-from pyrogram.errors import FloodWait
+
 import time
 from config import API_ID, API_HASH, BOT_TOKEN
 from pyrogram.enums import ChatMembersFilter
@@ -2636,6 +2644,7 @@ async def auto_unlock_after_duration(client, chat_id, lock_type, duration):
 
 
 # ================= LOCK STATUS COMMAND =================
+# ================= LOCK STATUS COMMAND =================
 @app.on_message(filters.command("lockstatus") & filters.group)
 async def lock_status_command(client, message: Message):
     """Show current lock status with detailed information"""
@@ -2690,7 +2699,7 @@ async def lock_status_command(client, message: Message):
 
 🏷️ **Chat:** {chat.title}
 🆔 **Chat ID:** `{chat_id}`
-👥 **Type:** {chat.type.title()}
+👥 **Type:** {chat.type.value.title() if hasattr(chat.type, 'value') else str(chat.type).title()}
 📊 **Active Locks:** {len(active_locks)} / 17
 
 """
@@ -2755,7 +2764,6 @@ async def lock_status_command(client, message: Message):
 3. Contact support if persists
 """
         await message.reply_text(error_text + beautiful_footer())
-
 # ================= Group lock by Bot admin COMMAND =================
 group_locks = {}  
 # ================= BOT ADMIN LOCK SYSTEM =================
