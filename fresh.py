@@ -15,6 +15,7 @@ from pyrogram.errors import PeerIdInvalid
 from pyrogram.enums import ChatAction, ChatMemberStatus
 from pyrogram.errors import FloodWait
 import time
+from config import API_ID, API_HASH, BOT_TOKEN
 from pyrogram.enums import ChatMembersFilter
 import shutil  # For backup system
 # Add ChatPrivileges conditionally
@@ -41,9 +42,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= CONFIG =================
-API_ID = 32310443
-API_HASH = "c356e2c32fca6e1ad119d5ea7134ae88"
-BOT_TOKEN = "8558150478:AAGeNAXetoEx7qTNKrsqMAr3HaXVvCDBkyI"
 
 SUPER_ADMIN = 6748792256  # Main super admin
 BOT_BRAND = "Ankit Shakya Support"
