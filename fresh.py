@@ -4270,31 +4270,54 @@ def contains_admin_keyword(text: str) -> str | None:
     return None
 
 
+        
 @app.on_message(filters.group & (filters.text | filters.caption), group=2)
-async def group_keyword_alert(client, message):
+async def admin_keyword_notify_even_if_group_muted(client, message):
+
+    if message.from_user.is_bot:
+        return
 
     text = message.text or message.caption
-    matched = contains_admin_keyword(text)
+    if not text:
+        return
 
+    matched = contains_admin_keyword(text)
     if not matched:
         return
 
-    cur.execute("SELECT admin_id FROM admins")
-    admins = cur.fetchall()
+    # Sender agar admin hai to skip
+    try:
+        member = await client.get_chat_member(message.chat.id, message.from_user.id)
+        if member.status in ("administrator", "owner"):
+            return
+    except:
+        pass
+
+    # 👨‍💼 Admin mentions
+    mentions = []
+    async for m in client.get_chat_members(
+        message.chat.id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        mentions.append(m.user.mention)
+
+    if not mentions:
+        return
 
     alert = (
         "🚨 **ADMIN REPORTS ALERT**\n\n"
-        f"🏡 Group: {message.chat.title}\n"
-        f"👤 User: {message.from_user.mention}\n"
-        f"🔑 Keyword: **{matched}**\n\n"
-        f"💬 Message:\n{text[:1500]}"
+        f"🔑 Keyword detected\n"
+        f"👤 User: {message.from_user.mention}\n\n"
+        f"{' '.join(mentions[:5])}"
     )
 
-    for (aid,) in admins:
-        try:
-            await client.send_message(aid, alert)
-        except:
-            pass
+    # 🔔 Mention notification bypasses group mute
+    await client.send_message(
+        chat_id=message.chat.id,
+        text=alert,
+        reply_to_message_id=message.id,
+        disable_notification=False  # important for mention
+    )
 
 
 # ================= WELCOME MESSAGE SETTING =================
