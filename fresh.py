@@ -227,7 +227,15 @@ CREATE TABLE IF NOT EXISTS report_cooldown (
     PRIMARY KEY (user_id, chat_id)
 )
 """)
-
+# ======================================================
+# ================= ADMIN REPORT SYSTEM =================
+# ======================================================
+cur.execute("""
+CREATE TABLE IF NOT EXISTS notify_state (
+    chat_id INTEGER PRIMARY KEY,
+    last_index INTEGER DEFAULT 0
+)
+""")
 # ======================================================
 # ================= TAG / PING SYSTEM ==================
 # ======================================================
@@ -4253,20 +4261,79 @@ async def myid_command(client, message: Message):
     
 
 ADMIN_KEYWORDS = [
-    "@admin", "admins",
-    "help", "support", "mod", "moderator"
+    "admin",
+    "@admin",
+    "support",
+    "admins"
+    "@admins",
+    "@support",
+    "help",
+    "urgent",
+    "mod",
+    "@mod"
 ]
 
+
+
+MAX_MENTIONS = 5
+
+async def get_rotating_admin_mentions(client, chat_id, cur, conn):
+    # 1️⃣ Group admins list
+    admins = []
+    async for m in client.get_chat_members(
+        chat_id,
+        filter=ChatMembersFilter.ADMINISTRATORS
+    ):
+        if not m.user.is_bot:
+            admins.append(m.user)
+
+    if not admins:
+        return []
+
+    total = len(admins)
+
+    # 2️⃣ Last index load
+    cur.execute(
+        "SELECT last_index FROM notify_state WHERE chat_id=?",
+        (chat_id,)
+    )
+    row = cur.fetchone()
+    start = row[0] if row else 0
+
+    # 3️⃣ Rotation batch
+    batch = []
+    for i in range(MAX_MENTIONS):
+        idx = (start + i) % total
+        batch.append(admins[idx].mention)
+
+    # 4️⃣ Save next index
+    next_index = (start + MAX_MENTIONS) % total
+    cur.execute(
+        "INSERT OR REPLACE INTO notify_state (chat_id, last_index) VALUES (?, ?)",
+        (chat_id, next_index)
+    )
+    conn.commit()
+
+    return batch
 
 
 def contains_admin_keyword(text: str) -> str | None:
     if not text:
         return None
 
-    clean = re.sub(r"[^a-zA-Z ]", "", text.lower())
+    text_low = text.lower()
+
+    # 1️⃣ Direct mention check (best)
     for kw in ADMIN_KEYWORDS:
-        if kw in clean:
+        if kw.startswith("@") and kw in text_low:
             return kw
+
+    # 2️⃣ Word-based check (safe)
+    words = re.findall(r"[a-zA-Z@]+", text_low)
+    for kw in ADMIN_KEYWORDS:
+        if kw in words:
+            return kw
+
     return None
 
 
@@ -4287,28 +4354,34 @@ async def admin_keyword_notify_even_if_group_muted(client, message):
 
     # Sender agar admin hai to skip
     try:
-        member = await client.get_chat_member(message.chat.id, message.from_user.id)
-        if member.status in ("administrator", "owner"):
+        member = await client.get_chat_member(
+            message.chat.id,
+            message.from_user.id
+        )
+        if member.status in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        ):
             return
     except:
         pass
 
-    # 👨‍💼 Admin mentions
-    mentions = []
-    async for m in client.get_chat_members(
+    # 🔁 Rotating admin mentions
+    mentions = await get_rotating_admin_mentions(
+        client,
         message.chat.id,
-        filter=ChatMembersFilter.ADMINISTRATORS
-    ):
-        mentions.append(m.user.mention)
-
+        cur,
+        conn
+    )
+    
     if not mentions:
         return
 
-    alert = (
+    alert = footer(
         "🚨 **ADMIN REPORTS ALERT**\n\n"
         f"🔑 Keyword detected\n"
         f"👤 User: {message.from_user.mention}\n\n"
-        f"{' '.join(mentions[:5])}"
+        f"{' '.join(mentions)}"
     )
 
     # 🔔 Mention notification bypasses group mute
