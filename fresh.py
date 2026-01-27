@@ -2627,17 +2627,20 @@ async def auto_unlock_after_duration(client, chat_id, lock_type, duration):
             )
         
         # Send auto-unlock notification
-        await client.send_message(
-            chat_id,
-            f"{beautiful_header('security')}\n\n"
-            f"⏰ **AUTO UNLOCK COMPLETE**\n\n"
-            f"🔓 **Lock Type:** {lock_type.title()}\n"
-            f"⏳ **Duration expired automatically**\n"
-            f"🤖 **System:** Automatic Bot\n\n"
-            f"The {lock_type} lock has been automatically removed.\n"
-            f"Permissions have been restored."
-            f"{beautiful_footer()}"
-        )
+        try:
+            await client.send_message(
+                chat_id,
+                f"{beautiful_header('security')}\n\n"
+                f"⏰ **AUTO UNLOCK COMPLETE**\n\n"
+                f"🔓 **Lock Type:** {lock_type.title()}\n"
+                f"⏳ **Duration expired automatically**\n"
+                f"🤖 **System:** Automatic Bot\n\n"
+                f"The {lock_type} lock has been automatically removed.\n"
+                f"Permissions have been restored."
+                f"{beautiful_footer()}"
+            )
+        except:
+            pass
         
     except Exception as e:
         print(f"Error in auto-unlock: {e}")
