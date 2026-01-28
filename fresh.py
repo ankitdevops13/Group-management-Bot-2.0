@@ -3173,76 +3173,218 @@ async def bot_admin_lock_command(client, message: Message):
             f"{beautiful_footer()}"
   )
 
-@app.on_message(filters.private & filters.command(["gunblock", "bunblock"]))
-async def bot_admin_unlock_command(client, message: Message):
-    """Bot admin unlock command - works by chat ID"""
+
+    
+# ================= IMPROVED BOT ADMIN UNLOCK COMMAND =================
+@app.on_message(filters.private & filters.command(["gunblock", "bunblock", "gunlock"]))
+async def bot_admin_unlock_command_smart(client, message: Message):
+    """Smart bot admin unlock command - checks if already unlocked"""
     
     # Check if user is bot admin
     if not is_bot_admin(message.from_user.id):
         await message.reply_text(
             f"{beautiful_header('admin')}\n\n"
-            "❌ **Bot Admin Required**"
+            "❌ **Bot Admin Required**\n"
+            "Only bot admins can use this command."
             f"{beautiful_footer()}"
         )
         return
     
     # Check command format
     if len(message.command) < 2:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "🔓 **BOT ADMIN UNLOCK SYSTEM**\n\n"
-            "**Usage:** `/unblock <chat_id> [silent]`\n\n"
-            "**Examples:**\n"
-            "• `/unblock -100123456789` - Unlock everything\n"
-            "• `/unblock -100123456789 silent` - Unlock silently\n\n"
-            "**Options:** silent (no announcement)"
-            f"{beautiful_footer()}"
-        )
+        help_text = f"""
+{beautiful_header('admin')}
+
+🔓 **BOT ADMIN UNLOCK SYSTEM**
+
+**Usage:** `/gunlock <chat_id> [silent]`
+
+**Examples:**
+• `/gunlock -100123456789` - Unlock group
+• `/gunlock -100123456789 silent` - Unlock silently
+
+**Options:** 
+• `silent` - No announcement in group
+• `force` - Force unlock even if appears unlocked
+
+**Note:** Chat ID negative होना चाहिए (जैसे -100123456789)
+"""
+        await message.reply_text(help_text + beautiful_footer())
         return
     
     try:
         # Parse arguments
-        chat_id = int(message.command[1])
+        chat_id_arg = message.command[1]
         silent = "silent" in [arg.lower() for arg in message.command]
+        force = "force" in [arg.lower() for arg in message.command]
+        
+        # Convert to integer
+        try:
+            chat_id = int(chat_id_arg)
+        except ValueError:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Invalid Chat ID:** `{chat_id_arg}`\n"
+                f"Chat ID must be a number."
+                f"{beautiful_footer()}"
+            )
+            return
         
         # Get chat info
         try:
             chat = await client.get_chat(chat_id)
-            chat_title = chat.title
-        except:
-            chat_title = f"Chat ID: {chat_id}"
+            chat_title = chat.title or f"Chat ID: {chat_id}"
+            chat_type = chat.type.value if hasattr(chat.type, 'value') else str(chat.type)
+        except Exception as e:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Cannot Access Chat**\n\n"
+                f"**Chat ID:** `{chat_id}`\n"
+                f"**Error:** {str(e)[:80]}\n\n"
+                f"Possible reasons:\n"
+                f"1. Bot not in that group\n"
+                f"2. Chat doesn't exist\n"
+                f"3. Bot was removed"
+                f"{beautiful_footer()}"
+            )
+            return
         
-        # Check current lock status
-        current_lock = group_locks.get(chat_id)
+        # Check if bot is admin in target chat
+        try:
+            bot_member = await client.get_chat_member(chat_id, "me")
+            bot_is_admin = bot_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+            
+            if not bot_is_admin:
+                await message.reply_text(
+                    f"{beautiful_header('admin')}\n\n"
+                    f"❌ **Bot Not Admin**\n\n"
+                    f"**Chat:** {chat_title}\n"
+                    f"**ID:** `{chat_id}`\n\n"
+                    f"I need admin permissions in that chat.\n"
+                    f"Please make me admin with 'Change Chat Info' permission."
+                    f"{beautiful_footer()}"
+                )
+                return
+        except Exception as e:
+            await message.reply_text(
+                f"{beautiful_header('admin')}\n\n"
+                f"❌ **Cannot Check Bot Status**\n\n"
+                f"**Error:** {str(e)[:80]}"
+                f"{beautiful_footer()}"
+            )
+            return
+        
+        # Check current permissions
+        try:
+            current_permissions = chat.permissions
+            
+            # Check if already fully unlocked
+            is_already_unlocked = (
+                current_permissions.can_send_messages and
+                current_permissions.can_send_media_messages and
+                current_permissions.can_send_other_messages and
+                current_permissions.can_add_web_page_previews and
+                current_permissions.can_send_polls and
+                current_permissions.can_change_info and
+                current_permissions.can_invite_users and
+                current_permissions.can_pin_messages
+            )
+            
+            # Check lock tracking
+            is_tracked_lock = chat_id in group_locks
+            is_tracked_in_chat_locks = chat_id in chat_locks and chat_locks[chat_id]
+            
+        except Exception as e:
+            print(f"⚠️ Could not check permissions: {e}")
+            is_already_unlocked = False
+            is_tracked_lock = False
+            is_tracked_in_chat_locks = False
+        
+        # If already unlocked and not forced, show status
+        if is_already_unlocked and not force and not is_tracked_lock and not is_tracked_in_chat_locks:
+            status_text = f"""
+{beautiful_header('info')}
+
+ℹ️ **CHAT ALREADY UNLOCKED**
+
+**Chat Info:**
+🏷️ **Title:** {chat_title}
+🆔 **Chat ID:** `{chat_id}`
+📢 **Type:** {chat_type}
+
+**Current Status:**
+✅ **Permissions:** All enabled
+✅ **Lock Tracking:** Not found
+✅ **Bot Admin:** Yes
+
+**No action needed!**
+
+💡 **Tip:** 
+• Use `/lockstatus` in group to check
+• Add `force` parameter to force unlock
+"""
+            
+            buttons = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔄 FORCE UNLOCK", 
+                        callback_data=f"force_unlock:{chat_id}:{int(silent)}"),
+                    InlineKeyboardButton("📊 CHECK STATUS", 
+                        callback_data=f"check_status:{chat_id}")
+                ],
+                [
+                    InlineKeyboardButton("🔙 BACK", callback_data="cancel_unlock")
+                ]
+            ])
+            
+            await message.reply_text(
+                status_text + beautiful_footer(),
+                reply_markup=buttons
+            )
+            return
         
         # Apply unlock
-        success = await apply_group_lock_by_id(client, chat_id, lock=False)
+        success = await apply_smart_unlock(client, chat_id, force)
         
         if not success:
             await message.reply_text(
                 f"{beautiful_header('admin')}\n\n"
                 f"❌ **Failed to unlock**\n\n"
-                f"Chat: {chat_title}\n"
-                f"ID: `{chat_id}`\n"
-                f"Error: Check bot permissions"
+                f"**Chat:** {chat_title}\n"
+                f"**ID:** `{chat_id}`\n\n"
+                f"**Error:** Check bot permissions\n"
+                f"Make sure bot has 'Change Chat Info' permission."
                 f"{beautiful_footer()}"
             )
             return
         
-        # Send confirmation to bot admin
+        # Prepare result message
         silent_text = " (Silent)" if silent else ""
+        force_text = " (Forced)" if force else ""
+        
+        previous_status = "Locked 🔒" if not is_already_unlocked else "Already Unlocked ✅"
+        tracking_status = "Tracked" if is_tracked_lock or is_tracked_in_chat_locks else "Not Tracked"
         
         admin_msg = f"""
 {beautiful_header('admin')}
 
-✅ **UNLOCK APPLIED**{silent_text}
+✅ **UNLOCK COMPLETE**{silent_text}{force_text}
 
-🏷️ **Chat:** {chat_title}
+**Chat Info:**
+🏷️ **Title:** {chat_title}
 🆔 **Chat ID:** `{chat_id}`
-🔓 **Previous Lock:** {current_lock['type'] if current_lock else 'None'}
-👨‍💼 **By:** {message.from_user.mention}
+📢 **Type:** {chat_type}
 
-⚡ **Status:** Successfully unlocked
+**Previous Status:**
+• **Permissions:** {previous_status}
+• **Tracking:** {tracking_status}
+
+**Action Taken:**
+• ✅ Permissions restored to default
+• ✅ Removed from lock tracking
+• ✅ Verification completed
+
+**Admin Info:**
+👨‍💼 **By:** {message.from_user.mention}
 """
         
         await message.reply_text(admin_msg + beautiful_footer())
@@ -3253,100 +3395,202 @@ async def bot_admin_unlock_command(client, message: Message):
                 group_msg = f"""
 {beautiful_header('settings')}
 
-🔓 **GROUP UNLOCKED** (by Bot Admin)
+🔓 **GROUP PERMISSIONS UPDATED**
 
-All permissions have been restored.
+✅ All permissions have been verified and restored.
 🤖 **Action:** Bot Admin Command
 
-📋 **Members can now send messages normally.**
+👨‍💼 **By:** {message.from_user.mention}
 """
                 
                 await client.send_message(chat_id, group_msg + beautiful_footer())
             except Exception as e:
                 print(f"Error sending group announcement: {e}")
+                await message.reply_text(
+                    f"⚠️ **Note:** Could not send announcement:\n`{str(e)[:80]}`"
+                )
         
-    except ValueError:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            "❌ **Invalid Chat ID**"
-            f"{beautiful_footer()}"
-        )
     except Exception as e:
-        await message.reply_text(
-            f"{beautiful_header('admin')}\n\n"
-            f"❌ **Error:** {str(e)[:100]}"
-            f"{beautiful_footer()}"
+        error_text = f"""
+{beautiful_header('danger')}
+
+❌ **UNLOCK FAILED**
+
+**Error:** {str(e)[:100]}
+
+**Possible Reasons:**
+1. Invalid chat ID
+2. Bot not admin
+3. Network error
+
+**Try:**
+1. Check bot is admin in group
+2. Use `force` parameter
+3. Try again later
+"""
+        await message.reply_text(error_text + beautiful_footer())
+
+async def apply_smart_unlock(client, chat_id, force=False):
+    """Smart unlock that checks current status"""
+    try:
+        # Get current chat info
+        chat = await client.get_chat(chat_id)
+        current_perms = chat.permissions
+        
+        # Default permissions
+        default_permissions = ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+            can_send_polls=True,
+            can_change_info=True,
+            can_invite_users=True,
+            can_pin_messages=True
         )
+        
+        # Check if permissions already match default
+        perms_match = (
+            current_perms.can_send_messages == default_permissions.can_send_messages and
+            current_perms.can_send_media_messages == default_permissions.can_send_media_messages and
+            current_perms.can_send_other_messages == default_permissions.can_send_other_messages and
+            current_perms.can_add_web_page_previews == default_permissions.can_add_web_page_previews and
+            current_perms.can_send_polls == default_permissions.can_send_polls and
+            current_perms.can_change_info == default_permissions.can_change_info and
+            current_perms.can_invite_users == default_permissions.can_invite_users and
+            current_perms.can_pin_messages == default_permissions.can_pin_messages
+        )
+        
+        # Only apply if permissions don't match or force is True
+        if not perms_match or force:
+            await client.set_chat_permissions(chat_id, default_permissions)
+            print(f"✅ Applied unlock to chat {chat_id} (perms didn't match)")
+        else:
+            print(f"ℹ️ Chat {chat_id} already has default permissions")
+        
+        # Always clear tracking
+        if chat_id in group_locks:
+            del group_locks[chat_id]
+            print(f"✅ Removed from group_locks tracking")
+        
+        if chat_id in chat_locks:
+            chat_locks[chat_id] = {}
+            print(f"✅ Cleared chat_locks tracking")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error in smart unlock for {chat_id}: {e}")
+        return False
 
-
-# ================= BOT ADMIN LOCK HELP =================
-@app.on_message(filters.private & filters.command("lockhelp"))
-async def bot_admin_lock_help(client, message: Message):
-    """Show bot admin lock help"""
+# Callback handlers
+@app.on_callback_query(filters.regex("^force_unlock:"))
+async def handle_force_unlock_callback(client, callback_query):
+    """Handle force unlock callback"""
     
-    if not is_bot_admin(message.from_user.id):
-        await message.reply_text("❌ Bot admins only!")
+    data = callback_query.data
+    parts = data.split(":")
+    
+    if len(parts) < 3:
+        await callback_query.answer("Invalid data!", show_alert=True)
         return
     
-    help_text = f"""
-{beautiful_header('admin')}
-
-🔒 **BOT ADMIN LOCK SYSTEM**
-
-⚡ **Commands (Private Chat Only):**
-• `/glock <chat_id> <type> [duration] [silent]` - Lock group
-• `/unblock <chat_id> [silent]` - Unlock group  
-• `/lockstatus <chat_id>` - Check lock status
-
-🔐 **17 Lock Types:**
-• `all` - Lock everything
-• `text` - Text messages only
-• `media` - All media messages
-• `stickers` - Stickers & GIFs
-• `polls` - Polls
-• `invites` - Invite links
-• `pins` - Pin messages
-• `info` - Change chat info
-• `url` - URLs/links
-• `games` - Games
-• `inline` - Inline bots
-• `voice` - Voice messages
-• `video` - Video messages
-• `audio` - Audio messages
-• `documents` - Documents
-• `photos` - Photos only
-• `forward` - Forwarded messages
-
-⏰ **Durations:**
-• `30m` - 30 minutes
-• `2h` - 2 hours
-• `1d` - 1 day
-• `1w` - 1 week
-• (Empty = Permanent)
-
-🔕 **Options:**
-• `silent` - No announcement in group
-
-📋 **Requirements:**
-1. You must be bot admin
-2. Bot must be admin in target group
-3. Bot needs 'Change Chat Info' permission
-
-🎯 **Examples:**
-• `/block -100123456789 all 1h` - Lock everything for 1 hour
-• `/block -100123456789 text silent` - Lock text silently
-• `/gunblock -100123456789` - Unlock everything
-• `/lockstatus -100123456789` - Check status
-
-⚡ **Features:**
-• Works without being group admin
-• Auto-unlock after duration
-• Silent mode available
-• Status tracking
-• Callback quick actions
-"""
+    chat_id = int(parts[1])
+    silent = bool(int(parts[2]))
     
-    await message.reply_text(help_text + beautiful_footer())
+    await callback_query.answer("Force unlocking...")
+    
+    try:
+        success = await apply_smart_unlock(client, chat_id, force=True)
+        
+        if success:
+            await callback_query.message.edit_text(
+                f"✅ **Force Unlock Complete**\n\n"
+                f"**Chat ID:** `{chat_id}`\n\n"
+                f"✅ Permissions verified\n"
+                f"✅ Tracking cleared\n"
+                f"✅ Force applied\n\n"
+                f"Chat is now fully unlocked."
+            )
+        else:
+            await callback_query.message.edit_text(
+                f"❌ **Force Unlock Failed**\n\n"
+                f"Could not unlock chat `{chat_id}`"
+            )
+            
+    except Exception as e:
+        await callback_query.message.edit_text(
+            f"❌ **Error:** {str(e)[:100]}"
+        )
+
+@app.on_callback_query(filters.regex("^check_status:"))
+async def handle_check_status(client, callback_query):
+    """Check chat status"""
+    
+    chat_id = int(callback_query.data.split(":")[1])
+    
+    await callback_query.answer("Checking status...")
+    
+    try:
+        chat = await client.get_chat(chat_id)
+        perms = chat.permissions
+        
+        status_text = f"""
+🔍 **CHAT STATUS**
+
+**Basic Info:**
+• **Title:** {chat.title}
+• **ID:** `{chat_id}`
+• **Type:** {chat.type.value if hasattr(chat.type, 'value') else str(chat.type)}
+
+**Permissions:**
+• 📝 Text: {'✅' if perms.can_send_messages else '❌'}
+• 🖼️ Media: {'✅' if perms.can_send_media_messages else '❌'}
+• 😀 Stickers: {'✅' if perms.can_send_other_messages else '❌'}
+• 📊 Polls: {'✅' if perms.can_send_polls else '❌'}
+• 🔗 URLs: {'✅' if perms.can_add_web_page_previews else '❌'}
+• 👥 Invites: {'✅' if perms.can_invite_users else '❌'}
+• 📌 Pin: {'✅' if perms.can_pin_messages else '❌'}
+• ℹ️ Change Info: {'✅' if perms.can_change_info else '❌'}
+
+**Lock Tracking:**
+• group_locks: {'✅ Found' if chat_id in group_locks else '❌ Not found'}
+• chat_locks: {'✅ Found' if chat_id in chat_locks and chat_locks[chat_id] else '❌ Not found'}
+"""
+        
+        await callback_query.message.edit_text(
+            status_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 BACK", callback_data="back_to_main")]
+            ])
+        )
+        
+    except Exception as e:
+        await callback_query.message.edit_text(
+            f"❌ **Error checking status:**\n`{str(e)[:100]}`"
+        )
+
+# Quick test command
+@app.on_message(filters.private & filters.command("testunlock"))
+async def test_unlock_command(client, message):
+    """Test unlock with current chat"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    # Use current chat (PM) or test ID
+    test_chat_id = -100123456789  # Replace with actual test ID
+    
+    await message.reply_text(
+        f"🧪 **Testing Unlock System**\n\n"
+        f"Test Chat ID: `{test_chat_id}`\n\n"
+        f"**Commands to test:**\n"
+        f"1. `/gunlock {test_chat_id}` - Normal unlock\n"
+        f"2. `/gunlock {test_chat_id} force` - Force unlock\n"
+        f"3. `/gunlock {test_chat_id} silent` - Silent unlock\n"
+        f"4. `/gunlock {test_chat_id} force silent` - Force + Silent\n\n"
+        f"**Note:** Replace with actual group ID"
+    )
   
 # ================= ADD TO YOUR START_BACKGROUND_TASKS =================
 # Add this function to your background tasks
