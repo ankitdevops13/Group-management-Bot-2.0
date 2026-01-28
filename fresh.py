@@ -932,13 +932,13 @@ ABUSE_WORDS = [
     # Romanized Hindi abuse (common variations)
     "mc", "bc", "randi", "chutiye", "bkl", "bsdk", "bsdka", "lodu", "lavdu",
     "madar", "behen", "chootiya", "chutiye", "gandu", "gandwe", "lund",
-    "land", "laund", "launda", "chut", "choot", "bhen", "maa", "maa ki",
+    "land", "laund", "launda", "chut", "choot",
     
     # Evasion attempts (common misspellings)
     "fuk", "shyt", "bich", "asshle", "mdrchod", "bhenchd", "chtiya", "gndu",
     "lundh", "rndi", "hrma", "kmina", "kuttaa", "kutti", "lawda", "lawde",
     "lauda", "laude", "choot", "gaandu", "bhonsdi", "bhosdika", "choduu",
-    "fak", "shit", "bich", "ass", "mader", "behn", "chutia", "gando",
+    "fak", "shit", "bich", "ass", "mader", "chutia", "gando",
     
     # Number substitutions (common evasions)
     "f0ck", "sh1t", "b1tch", "4ss", "@ss", "@ssh0le", "m0therfucker",
@@ -1941,9 +1941,10 @@ async def demote_command(client, message: Message):
 chat_locks = {}
 
 # ================= LOCK COMMAND =================
+ # ================= FIXED LOCK COMMAND WITH WORKING AUTO-UNLOCK =================
 @app.on_message(filters.command(["lock", "block"]) & filters.group)
 async def lock_chat_permissions(client, message: Message):
-    """Lock specific permissions in the group - Command only version"""
+    """Lock specific permissions in the group - FIXED with auto-unlock"""
     
     # Check permissions
     user_id = message.from_user.id
@@ -1981,7 +1982,7 @@ async def lock_chat_permissions(client, message: Message):
             "1. Open group settings\n"
             "2. Go to Administrators\n"
             "3. Select this bot\n"
-            "4. Enable all permissions\n"
+            "4. Enable all permissions"
             f"{beautiful_footer()}"
         )
         return
@@ -2023,38 +2024,15 @@ async def lock_chat_permissions(client, message: Message):
 **Usage:** `/lock [type] [duration]`
 
 **Available Lock Types (17 total):**
-
-**🔐 MAJOR LOCKS:**
-• `/lock all` - Lock everything completely
-• `/lock text` - Disable text messages
-• `/lock media` - Disable all media
-• `/lock forward` - Auto-delete forwarded messages
-
-**📱 MEDIA LOCKS:**
-• `/lock photos` - Disable photos
-• `/lock video` - Disable videos
-• `/lock audio` - Disable audio
-• `/lock voice` - Disable voice messages
-• `/lock documents` - Disable documents
-
-**⚙️ FEATURE LOCKS:**
-• `/lock stickers` - Disable stickers/GIFs
-• `/lock polls` - Disable polls
-• `/lock invites` - Disable invite links
-• `/lock pins` - Disable pinning
-• `/lock games` - Disable games
-• `/lock inline` - Disable inline bots
-• `/lock url` - Disable links
-• `/lock info` - Prevent info changes
+• all, text, media, stickers, polls, invites
+• pins, info, url, games, inline, voice
+• video, audio, documents, photos, forward
 
 **⏰ DURATION FORMAT:**
 • `/lock text 30m` - Lock for 30 minutes
 • `/lock all 2h` - Lock for 2 hours
 • `/lock media 1d` - Lock for 1 day
 • `/lock stickers 1w` - Lock for 1 week
-
-**📊 Check Status:** `/lockstatus`
-**🔓 Unlock:** `/unlock [type]`
 
 **Examples:**
 • `/lock all 1h` - Lock everything for 1 hour
@@ -2073,7 +2051,10 @@ async def lock_chat_permissions(client, message: Message):
     if len(message.command) > 2:
         duration = parse_duration(message.command[2])
         if duration:
-            duration_text = str(duration)
+            duration_text = f"{duration}"
+        else:
+            # If duration parsing failed, treat as reason
+            pass
     
     # Validate lock type
     if lock_type not in lock_types:
@@ -2224,7 +2205,11 @@ You entered: `{lock_type}`
         
         # Schedule auto-unlock if duration specified
         if duration:
-            asyncio.create_task(auto_unlock_after_duration(client, chat_id, lock_type, duration))
+            # Create a proper async task for auto-unlock
+            asyncio.create_task(
+                auto_unlock_with_logging(client, chat_id, lock_type, duration)
+            )
+            print(f"✅ Auto-unlock scheduled for {lock_type} in {duration}")
         
         # Get admin type
         admin_type = "⚡ Bot Admin" if is_bot_admin_user else "🔧 Group Admin"
@@ -2246,31 +2231,19 @@ You entered: `{lock_type}`
 
 🔒 **What's Locked:**
 {details}
-
+"""
+        
+        if duration:
+            hours = duration.total_seconds() // 3600
+            minutes = (duration.total_seconds() % 3600) // 60
+            success_text += f"\n⏰ **Auto-unlock in:** {int(hours)}h {int(minutes)}m\n"
+        
+        success_text += f"""
 📊 **To Check:** `/lockstatus`
 🔓 **To Remove:** `/unlock {lock_type}`
 """
         
         await message.reply_text(success_text + beautiful_footer())
-        
-        # Send notification to chat (for major locks)
-        if lock_type in ["all", "text", "media"]:
-            await asyncio.sleep(1)
-            notify_text = f"""
-{beautiful_header('security')}
-
-⚠️ **GROUP NOTICE**
-
-{action_text}
-
-The {lock_type} lock has been applied by an admin.
-{duration_text.capitalize() if 'permanent' not in duration_text.lower() else ''}
-
-Please follow group rules during this time.
-"""
-            notification = await message.reply_text(notify_text + beautiful_footer())
-            await asyncio.sleep(10)
-            await notification.delete()
         
     except Exception as e:
         error_text = f"""
@@ -2278,7 +2251,7 @@ Please follow group rules during this time.
 
 ❌ **LOCK FAILED**
 
-**Error:** {str(e)[:80]}
+**Error:** {str(e)[:100]}
 
 **Possible Reasons:**
 1. Bot missing 'Change Chat Info' permission
@@ -2289,11 +2262,8 @@ Please follow group rules during this time.
 1. Check bot permissions
 2. Wait a moment and try again
 3. Contact bot admin if issue persists
-
-**Your Command:** `/lock {lock_type} {duration_text if duration else ''}`
 """
         await message.reply_text(error_text + beautiful_footer())
-
 
 # ================= UNLOCK COMMAND =================
 @app.on_message(filters.command(["unlock", "unblock"]) & filters.group)
@@ -2599,17 +2569,29 @@ Enjoy your conversations!
         await message.reply_text(error_text + beautiful_footer())
 
 
-async def auto_unlock_after_duration(client, chat_id, lock_type, duration):
-    """Auto-unlock after specified duration"""
-    await asyncio.sleep(duration.total_seconds())
+
+
+async def auto_unlock_with_logging(client, chat_id, lock_type, duration):
+    """Reliable auto-unlock with logging"""
     
     try:
-        # Remove lock from state
+        # Convert duration to seconds
+        wait_seconds = duration.total_seconds()
+        print(f"⏰ Auto-unlock scheduled: Waiting {wait_seconds} seconds for {lock_type} in chat {chat_id}")
+        
+        # Wait for the duration
+        await asyncio.sleep(wait_seconds)
+        
+        print(f"🔓 Auto-unlock executing: Unlocking {lock_type} in chat {chat_id}")
+        
+        # Remove lock from tracking
         if chat_id in chat_locks and lock_type in chat_locks[chat_id]:
+            print(f"📝 Removing {lock_type} from chat_locks tracking")
             del chat_locks[chat_id][lock_type]
         
-        # Restore default permissions for this specific lock
-        if lock_type != "all" and lock_type != "forward":
+        # Restore default permissions
+        if lock_type not in ["forward"]:  # Don't restore for forward lock
+            print(f"🔧 Restoring permissions for {lock_type}")
             default_permissions = ChatPermissions(
                 can_send_messages=True,
                 can_send_media_messages=True,
@@ -2621,32 +2603,37 @@ async def auto_unlock_after_duration(client, chat_id, lock_type, duration):
                 can_pin_messages=True
             )
             
-            await client.set_chat_permissions(
-                chat_id=chat_id,
-                permissions=default_permissions
-            )
+            try:
+                await client.set_chat_permissions(
+                    chat_id=chat_id,
+                    permissions=default_permissions
+                )
+                print(f"✅ Permissions restored for {lock_type} in chat {chat_id}")
+            except Exception as e:
+                print(f"❌ Error restoring permissions: {e}")
         
-        # Send auto-unlock notification
+        # Send notification
         try:
             await client.send_message(
                 chat_id,
                 f"{beautiful_header('security')}\n\n"
                 f"⏰ **AUTO UNLOCK COMPLETE**\n\n"
                 f"🔓 **Lock Type:** {lock_type.title()}\n"
-                f"⏳ **Duration expired automatically**\n"
-                f"🤖 **System:** Automatic Bot\n\n"
-                f"The {lock_type} lock has been automatically removed.\n"
-                f"Permissions have been restored."
+                f"⏳ **Duration:** {duration} expired\n"
+                f"🤖 **System:** Automatic Timer\n\n"
+                f"✅ Permissions have been automatically restored."
                 f"{beautiful_footer()}"
             )
-        except:
-            pass
-        
+            print(f"📢 Auto-unlock notification sent for {lock_type} in chat {chat_id}")
+        except Exception as e:
+            print(f"⚠️ Could not send auto-unlock notification: {e}")
+            
     except Exception as e:
-        print(f"Error in auto-unlock: {e}")
+        print(f"❌ ERROR in auto-unlock task: {e}")
+        import traceback
+        traceback.print_exc()
 
 
-# ================= LOCK STATUS COMMAND =================
 # ================= LOCK STATUS COMMAND =================
 @app.on_message(filters.command("lockstatus") & filters.group)
 async def lock_status_command(client, message: Message):
@@ -2769,9 +2756,6 @@ async def lock_status_command(client, message: Message):
         await message.reply_text(error_text + beautiful_footer())
 # ================= Group lock by Bot admin COMMAND =================
 group_locks = {}  
-# ================= BOT ADMIN LOCK SYSTEM =================
-# Store group locks with chat ID as key
-group_locks = {}
 
 LOCK_PERMISSIONS = {
     "all": ChatPermissions(
