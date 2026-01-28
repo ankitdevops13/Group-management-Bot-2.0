@@ -20,8 +20,7 @@ from pyrogram.errors import (
     MessageNotModified,
     MessageDeleteForbidden
 )
-from pyrogram.enums import ChatAction, ChatMemberStatus
-
+from pyrogram import utils
 import time
 from config import API_ID, API_HASH, BOT_TOKEN
 from pyrogram.enums import ChatMembersFilter
@@ -48,6 +47,20 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+
+
+def get_peer_type_new(peer_id: int) -> str:
+    peer_id_str = str(peer_id)
+    if not peer_id_str.startswith("-"):
+        return "user"
+    elif peer_id_str.startswith("-100"):
+        return "channel"
+    else:
+        return "chat"
+
+utils.get_peer_type = get_peer_type_new
 
 # ================= CONFIG =================
 
@@ -854,10 +867,54 @@ def moderation_buttons():
     ], columns=3)
 
 
-# ================= ENHANCED START COMMAND =================
+# ================= peer id check=================
 
+@app.on_message(filters.private & filters.command("testpeer"))
+async def test_peer_id(client, message):
+    """Test peer ID access"""
+    
+    if not is_bot_admin(message.from_user.id):
+        return
+    
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /testpeer -100123456789")
+        return
+    
+    chat_id_str = message.command[1]
+    
+    try:
+        chat_id = int(chat_id_str)
+        
+        info = f"""
+🔍 **PEER ID TEST**
 
-
+**Input:** `{chat_id_str}`
+**As int:** `{chat_id}`
+**Type:** {'Negative' if chat_id < 0 else 'Positive'}
+**Starts with -100:** {'✅ Yes' if str(chat_id).startswith('-100') else '❌ No'}
+"""
+        
+        # Try different access methods
+        try:
+            chat = await client.get_chat(chat_id)
+            info += f"\n✅ **get_chat SUCCESS**"
+            info += f"\n  • Title: {chat.title}"
+            info += f"\n  • Type: {chat.type}"
+        except Exception as e1:
+            info += f"\n❌ **get_chat FAILED**: {type(e1).__name__}"
+        
+        # Try get_chat_member
+        try:
+            member = await client.get_chat_member(chat_id, "me")
+            info += f"\n✅ **get_chat_member SUCCESS**"
+            info += f"\n  • Status: {member.status}"
+        except Exception as e2:
+            info += f"\n❌ **get_chat_member FAILED**: {type(e2).__name__}"
+        
+        await message.reply_text(info)
+        
+    except ValueError:
+        await message.reply_text(f"❌ Invalid number: `{chat_id_str}`")
 
 
 # ================= HELPER FUNCTIONS =================
