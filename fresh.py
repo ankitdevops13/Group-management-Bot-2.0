@@ -4823,16 +4823,9 @@ async def myid_command(client, message: Message):
     
 
 ADMIN_KEYWORDS = [
-    "admin",
     "@admin",
-    "support",
-    "admins"
-    "@admins",
-    "@support",
-    "help",
-    "urgent",
-    "mod",
-    "@mod"
+    "@admins"
+    
 ]
 
 
