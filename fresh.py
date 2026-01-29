@@ -1017,17 +1017,21 @@ ABUSE_REGEX = re.compile(
 )
 
 
+
 # ================= UNIVERSAL MODERATION COMMAND HANDLER =========
+
 async def handle_moderation_command(client, message: Message, command_type="mute"):
     """
-    Universal handler for all moderation commands
+    Universal handler for all moderation commands - FIXED VERSION
     command_type: "mute", "unmute", "warn", "ban", "unban", "kick"
     """
     
     # Check admin status
     user_id = message.from_user.id
+    chat_id = message.chat.id
+    
     is_bot_admin_user = is_bot_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, message.chat.id, user_id)
+    is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
     
     # Determine which command prefix to use
     command_prefix = message.command[0]  # /mute, /bmute, etc.
@@ -1060,7 +1064,7 @@ async def handle_moderation_command(client, message: Message, command_type="mute
             return False
     
     # Check bot permissions
-    if not await can_bot_restrict(client, message.chat.id):
+    if not await can_bot_restrict(client, chat_id):
         await message.reply_text(
             f"{beautiful_header('moderation')}\n\n"
             "❌ **Bot Needs Admin Rights**\n"
@@ -1075,7 +1079,7 @@ async def handle_moderation_command(client, message: Message, command_type="mute
     args = []
     
     # Method 1: Reply to message
-    if message.reply_to_message:
+    if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
         args = message.command[1:]  # Duration/reason
     
@@ -1128,22 +1132,247 @@ async def handle_moderation_command(client, message: Message, command_type="mute
         )
         return False
     
-    # Check if target is admin (can't moderate admins)
+    # =============== FIX: CHECK IF TARGET IS BOT ITSELF ===============
+    # Prevent action on the bot itself
+    if target_user.id == client.me.id:
+        bot_name = client.me.first_name or "the bot"
+        action_text = {
+            "mute": "mute", "unmute": "unmute", 
+            "ban": "ban", "unban": "unban",
+            "kick": "kick", "warn": "warn"
+        }.get(command_type, "act on")
+        
+        await message.reply_text(
+            f"{beautiful_header('warning')}\n\n"
+            f"🤖 **I AM THE BOT!**\n\n"
+            f"You cannot {action_text} me ({bot_name}).\n"
+            f"I'm the one running this group!\n\n"
+            f"💡 **Tip:** I control the group, don't try to control me!"
+            + beautiful_footer()
+        )
+        return False
+    # =================================================================
+    
+    # Check if target is admin (can't moderate admins) - WITH FIXES
     try:
-        target_member = await client.get_chat_member(message.chat.id, target_user.id)
+        target_member = await client.get_chat_member(chat_id, target_user.id)
+        
+        # =============== FIX: BOT ADMINS CAN MODERATE GROUP ADMINS ===============
+        # If user is bot admin, they can moderate group admins
+        if is_bot_admin_user:
+            # Bot admins can moderate anyone except themselves and other bot admins
+            if target_user.id == user_id:
+                return target_user, args  # Already handled above
+            
+            # Check if target is also a bot admin
+            if is_bot_admin(target_user.id):
+                await message.reply_text(
+                    f"{beautiful_header('moderation')}\n\n"
+                    f"❌ **Cannot moderate bot admin**\n"
+                    f"User {target_user.mention} is also a bot admin.\n"
+                    f"Only super admin can moderate other bot admins."
+                    + beautiful_footer()
+                )
+                return False
+            
+            # Bot admin can moderate group admins
+            return target_user, args
+        # ========================================================================
+        
+        # For regular users (not bot admins)
         if target_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            # Check if user is group owner
+            try:
+                user_member = await client.get_chat_member(chat_id, user_id)
+                if user_member.status == ChatMemberStatus.OWNER:
+                    # Group owner can moderate admins
+                    return target_user, args
+            except:
+                pass
+            
             await message.reply_text(
                 f"{beautiful_header('moderation')}\n\n"
                 f"❌ **Cannot moderate admin**\n"
-                f"User {target_user.mention} is an admin.\n"
+                f"User {target_user.mention} is a group admin.\n"
                 f"Only group owner can moderate admins."
                 + beautiful_footer()
             )
             return False
-    except:
+            
+    except Exception as e:
+        print(f"Error checking target member: {e}")
+        # If we can't check, proceed anyway
         pass
     
     return target_user, args
+
+@app.on_message(filters.command(["mybotadmin", "myadmin", "botadmin"]) & filters.group)
+async def my_bot_admin_group_command(client, message: Message):
+    """Check bot admin status in groups"""
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Check all statuses
+    is_bot_admin_user = is_bot_admin(user_id)
+    is_super_admin = user_id == SUPER_ADMIN
+    
+    # Check group admin status
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        is_group_admin = member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+        is_group_owner = member.status == ChatMemberStatus.OWNER
+    except:
+        is_group_admin = False
+        is_group_owner = False
+    
+    # Check bot permissions in group
+    bot_can_restrict = await can_bot_restrict(client, chat_id)
+    
+    status_text = f"""
+{beautiful_header('admin')}
+
+📊 **ADMIN STATUS - {message.chat.title}**
+
+**👤 Your Status:**
+• Bot Super Admin: {'✅ Yes' if is_super_admin else '❌ No'}
+• Bot Admin: {'✅ Yes' if is_bot_admin_user else '❌ No'}
+• Group Admin: {'✅ Yes' if is_group_admin else '❌ No'}
+• Group Owner: {'✅ Yes' if is_group_owner else '❌ No'}
+
+**🤖 Bot Status:**
+• Admin in Group: {'✅ Yes' if bot_can_restrict else '❌ No'}
+
+**🔧 Available Commands:**
+"""
+    
+    # Add available commands based on status
+    if is_super_admin:
+        status_text += "• All commands (Super Admin)\n"
+    elif is_bot_admin_user:
+        status_text += "• /bmute, /bban, /bwarn, etc.\n"
+        status_text += "• /purge, /purgeall\n"
+        status_text += "• /lock, /unlock\n"
+        status_text += "• /promote, /demote\n"
+    elif is_group_admin:
+        status_text += "• /mute, /ban, /warn, /kick\n"
+        status_text += "• /purge, /purgeall\n"
+        status_text += "• /lock, /unlock\n"
+        status_text += "• /promote, /demote\n"
+    else:
+        status_text += "• Regular user commands only\n"
+        status_text += "• /id, /myid, /chatid\n"
+        status_text += "• /tagadmin\n"
+        status_text += "• /help\n"
+    
+    status_text += f"\n**💡 Tip:** Use `/mystatus` for detailed permission check"
+    
+    await message.reply_text(status_text + beautiful_footer())
+
+@app.on_message(filters.command("mystatus") & filters.group)
+async def my_status_command(client, message: Message):
+    """Detailed status check"""
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Get all statuses
+    is_bot_admin_user = is_bot_admin(user_id)
+    is_super_admin = user_id == SUPER_ADMIN
+    
+    # Get group member info
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        member_status = member.status.value if hasattr(member.status, 'value') else str(member.status)
+        is_group_admin = member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+        is_group_owner = member.status == ChatMemberStatus.OWNER
+        
+        # Get specific permissions if admin
+        if is_group_admin and hasattr(member, 'privileges'):
+            can_delete = member.privileges.can_delete_messages
+            can_restrict = member.privileges.can_restrict_members
+            can_pin = member.privileges.can_pin_messages
+            can_invite = member.privileges.can_invite_users
+            can_promote = member.privileges.can_promote_members
+            can_change = member.privileges.can_change_info
+        else:
+            can_delete = can_restrict = can_pin = can_invite = can_promote = can_change = False
+    except:
+        member_status = "Unknown"
+        is_group_admin = is_group_owner = False
+        can_delete = can_restrict = can_pin = can_invite = can_promote = can_change = False
+    
+    # Check bot permissions
+    bot_can_restrict = await can_bot_restrict(client, chat_id)
+    
+    # Create status table
+    status_text = f"""
+{beautiful_header('info')}
+
+📊 **DETAILED STATUS REPORT**
+
+**👤 USER INFO:**
+• Name: {message.from_user.first_name or ''} {message.from_user.last_name or ''}
+• ID: `{user_id}`
+• Username: @{message.from_user.username if message.from_user.username else 'Not set'}
+
+**🏷️ GROUP INFO:**
+• Title: {message.chat.title}
+• ID: `{chat_id}`
+• Your Status: {member_status}
+
+**🔐 ADMIN STATUS:**
+• Bot Super Admin: {'✅' if is_super_admin else '❌'}
+• Bot Admin: {'✅' if is_bot_admin_user else '❌'}
+• Group Admin: {'✅' if is_group_admin else '❌'}
+• Group Owner: {'✅' if is_group_owner else '❌'}
+
+**🛡️ YOUR PERMISSIONS:**
+• Delete Messages: {'✅' if can_delete else '❌'}
+• Restrict Users: {'✅' if can_restrict else '❌'}
+• Pin Messages: {'✅' if can_pin else '❌'}
+• Invite Users: {'✅' if can_invite else '❌'}
+• Promote Admins: {'✅' if can_promote else '❌'}
+• Change Info: {'✅' if can_change else '❌'}
+
+**🤖 BOT STATUS:**
+• Admin in Group: {'✅ Yes' if bot_can_restrict else '❌ No'}
+
+**⚡ AVAILABLE COMMANDS:**
+"""
+    
+    # Add commands based on permissions
+    commands_list = []
+    
+    # Everyone can use
+    commands_list.append("• /id, /myid, /chatid")
+    commands_list.append("• /tagadmin")
+    commands_list.append("• /help, /mystatus")
+    
+    # Group admins
+    if is_group_admin or is_bot_admin_user:
+        commands_list.append("• /mute, /unmute, /ban, /unban, /kick, /warn")
+        commands_list.append("• /purge, /purgeall, /pin, /unpin")
+        commands_list.append("• /lock, /unlock, /lockstatus")
+        commands_list.append("• /promote, /demote")
+        commands_list.append("• /setwelcome, /delwelcome")
+        commands_list.append("• /tagall, /stop")
+    
+    # Bot admins only
+    if is_bot_admin_user:
+        commands_list.append("• /bmute, /bunmute, /bban, /bunban, /bkick, /bwarn")
+    
+    # Super admin only
+    if is_super_admin:
+        commands_list.append("• /addbotadmin, /removebotadmin")
+        commands_list.append("• /exportcsv, /broadcast")
+        commands_list.append("• /glock, /gunlock")
+    
+    status_text += "\n".join(commands_list)
+    
+    status_text += f"\n\n**💡 Note:** Bot admin commands work in PM only"
+    
+    await message.reply_text(status_text + beautiful_footer())
 
 
 # ================= MUTE COMMANDS =================
