@@ -1019,192 +1019,111 @@ ABUSE_REGEX = re.compile(
 
 
 # ================= UNIVERSAL MODERATION COMMAND HANDLER =========
-
 async def handle_moderation_command(client, message: Message, command_type="mute"):
-    """
-    Universal handler for all moderation commands - FIXED VERSION
-    command_type: "mute", "unmute", "warn", "ban", "unban", "kick"
-    """
-    
-    # Check admin status
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    
-    is_bot_admin_user = is_bot_admin(user_id)
-    is_group_admin_user = await can_user_restrict(client, chat_id, user_id)
-    
-    # Determine which command prefix to use
-    command_prefix = message.command[0]  # /mute, /bmute, etc.
-    is_bot_command = command_prefix.startswith("b") and len(command_prefix) > 1
-    
-    # Check permissions
+    user = message.from_user
+    chat = message.chat
+
+    cmd = message.command[0].lower()   # mute / bmute / ban / bban
+
+    is_bot_admin_user = is_bot_admin(user.id)
+    is_group_admin_user = await can_user_restrict(client, chat.id, user.id)
+
+    REGULAR_COMMANDS = ["ban", "mute", "unmute", "warn", "kick"]
+    BOT_ADMIN_COMMANDS = ["b" + c for c in REGULAR_COMMANDS]
+
+    is_bot_command = cmd in BOT_ADMIN_COMMANDS
+    base_command = cmd[1:] if is_bot_command else cmd  # bmute -> mute
+
+    # ---------------- PERMISSION CHECK ----------------
     if is_bot_command:
-        # Bot admin command - require bot admin status
+        # ONLY bot admin
         if not is_bot_admin_user:
             await message.reply_text(
                 f"{beautiful_header('moderation')}\n\n"
                 "❌ **Bot Admin Required**\n"
-                "This command is only for bot admins.\n"
-                "Use `/mybotadmin` to check your status."
+                "This command is restricted to bot admins."
                 + beautiful_footer()
             )
-            return False
+            return None
     else:
-        # Regular command - require group admin OR bot admin
+        # normal command
         if not (is_group_admin_user or is_bot_admin_user):
             await message.reply_text(
                 f"{beautiful_header('moderation')}\n\n"
                 "❌ **Permission Denied**\n"
-                "You need to be either:\n"
-                "• Group admin (with restrict permissions)\n"
-                "• Bot admin (added to bot admin list)\n\n"
-                "Use `/mystatus` to check your permissions."
+                "You must be Group Admin or Bot Admin."
                 + beautiful_footer()
             )
-            return False
-    
-    # Check bot permissions
-    if not await can_bot_restrict(client, chat_id):
+            return None
+
+    # ---------------- BOT ADMIN RIGHTS ----------------
+    if not await can_bot_restrict(client, chat.id):
         await message.reply_text(
             f"{beautiful_header('moderation')}\n\n"
             "❌ **Bot Needs Admin Rights**\n"
-            "I need admin permissions in this group.\n"
-            "Please make me admin with 'Restrict Users' permission."
+            "Grant me 'Restrict Users' permission."
             + beautiful_footer()
         )
-        return False
-    
-    # Get target user
+        return None
+
+    # ---------------- TARGET USER ----------------
     target_user = None
     args = []
-    
-    # Method 1: Reply to message
-    if message.reply_to_message and message.reply_to_message.from_user:
+
+    if message.reply_to_message:
         target_user = message.reply_to_message.from_user
-        args = message.command[1:]  # Duration/reason
-    
-    # Method 2: User ID/Username from command
+        args = message.command[1:]
+
     elif len(message.command) > 1:
         user_arg = message.command[1]
-        args = message.command[2:]  # Duration/reason
-        
+        args = message.command[2:]
         try:
-            if user_arg.startswith("@"):
-                target_user = await client.get_users(user_arg[1:])
-            else:
-                target_user = await client.get_users(int(user_arg))
-        except Exception as e:
+            target_user = await client.get_users(user_arg.lstrip("@"))
+        except:
             await message.reply_text(
                 f"{beautiful_header('moderation')}\n\n"
-                f"❌ **User Not Found**\n`{user_arg}`"
+                "❌ **User Not Found**"
                 + beautiful_footer()
             )
-            return False
-    
+            return None
+
     if not target_user:
-        usage_text = f"""
-{beautiful_header('moderation')}
-
-❌ **User Required**
-
-**Usage:**
-1. Reply to user + `/{command_prefix} [duration] [reason]`
-2. `/{command_prefix} @username [duration] [reason]`
-
-**Examples:**
-• `/{command_prefix} @user 1h Spamming`
-• `/{command_prefix}` (reply to user)
-"""
-        
-        if command_type in ["mute", "ban", "warn"]:
-            usage_text += "\n**Duration:** 30m, 2h, 1d, 1w"
-        
-        await message.reply_text(usage_text + beautiful_footer())
-        return False
-    
-    # Prevent self-action
-    if target_user.id == user_id:
         await message.reply_text(
             f"{beautiful_header('moderation')}\n\n"
-            "😂 **Seriously?**\n"
-            "You cannot perform this action on yourself!"
+            f"❌ **User Required**\n\n"
+            f"Usage:\n"
+            f"/{cmd} @user [duration] [reason]\n"
+            f"or reply to user"
             + beautiful_footer()
         )
-        return False
-    
-    # =============== FIX: CHECK IF TARGET IS BOT ITSELF ===============
-    # Prevent action on the bot itself
-    if target_user.id == client.me.id:
-        bot_name = client.me.first_name or "the bot"
-        action_text = {
-            "mute": "mute", "unmute": "unmute", 
-            "ban": "ban", "unban": "unban",
-            "kick": "kick", "warn": "warn"
-        }.get(command_type, "act on")
-        
+        return None
+
+    # ---------------- SELF ACTION BLOCK ----------------
+    if target_user.id == user.id:
         await message.reply_text(
-            f"{beautiful_header('warning')}\n\n"
-            f"🤖 **I AM THE BOT!**\n\n"
-            f"You cannot {action_text} me ({bot_name}).\n"
-            f"I'm the one running this group!\n\n"
-            f"💡 **Tip:** I control the group, don't try to control me!"
+            f"{beautiful_header('moderation')}\n\n"
+            "😂 You cannot moderate yourself."
             + beautiful_footer()
         )
-        return False
-    # =================================================================
-    
-    # Check if target is admin (can't moderate admins) - WITH FIXES
+        return None
+
+    # ---------------- TARGET ADMIN CHECK ----------------
     try:
-        target_member = await client.get_chat_member(chat_id, target_user.id)
-        
-        # =============== FIX: BOT ADMINS CAN MODERATE GROUP ADMINS ===============
-        # If user is bot admin, they can moderate group admins
-        if is_bot_admin_user:
-            # Bot admins can moderate anyone except themselves and other bot admins
-            if target_user.id == user_id:
-                return target_user, args  # Already handled above
-            
-            # Check if target is also a bot admin
-            if is_bot_admin(target_user.id):
+        member = await client.get_chat_member(chat.id, target_user.id)
+        if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            # bot admin override allowed
+            if not is_bot_admin_user:
                 await message.reply_text(
                     f"{beautiful_header('moderation')}\n\n"
-                    f"❌ **Cannot moderate bot admin**\n"
-                    f"User {target_user.mention} is also a bot admin.\n"
-                    f"Only super admin can moderate other bot admins."
+                    "❌ Cannot moderate an admin."
                     + beautiful_footer()
                 )
-                return False
-            
-            # Bot admin can moderate group admins
-            return target_user, args
-        # ========================================================================
-        
-        # For regular users (not bot admins)
-        if target_member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            # Check if user is group owner
-            try:
-                user_member = await client.get_chat_member(chat_id, user_id)
-                if user_member.status == ChatMemberStatus.OWNER:
-                    # Group owner can moderate admins
-                    return target_user, args
-            except:
-                pass
-            
-            await message.reply_text(
-                f"{beautiful_header('moderation')}\n\n"
-                f"❌ **Cannot moderate admin**\n"
-                f"User {target_user.mention} is a group admin.\n"
-                f"Only group owner can moderate admins."
-                + beautiful_footer()
-            )
-            return False
-            
-    except Exception as e:
-        print(f"Error checking target member: {e}")
-        # If we can't check, proceed anyway
+                return None
+    except:
         pass
-    
-    return target_user, args
+
+    return target_user, args, base_command
+
 
 @app.on_message(filters.command(["mybotadmin", "myadmin", "botadmin"]) & filters.group)
 async def my_bot_admin_group_command(client, message: Message):
