@@ -1303,7 +1303,7 @@ async def universal_mute(client, message: Message):
     if not result:
         return
     
-    target_user, args = result
+    target_user, args, base_command = result
     
     # Parse duration and reason
     duration = None
@@ -1527,7 +1527,7 @@ async def universal_warn(client, message: Message):
     if not result:
         return
     
-    target_user, args = result
+    target_user, args, base_command = result
     
     # Parse reason
     reason = "No reason provided"
@@ -1595,7 +1595,7 @@ async def universal_ban(client, message: Message):
     if not result:
         return
     
-    target_user, args = result
+    target_user, args, base_command = result
     
     # Parse reason
     reason = "No reason provided"
@@ -1647,7 +1647,7 @@ async def universal_unban(client, message: Message):
     if not result:
         return
     
-    target_user, _ = result
+    target_user, args, base_command = result
     
     # Check admin type for message
     is_bot_admin_user = is_bot_admin(message.from_user.id)
@@ -1686,7 +1686,7 @@ async def universal_kick(client, message: Message):
     if not result:
         return
     
-    target_user, args = result
+    target_user, args, base_command = result
     
     # Parse reason
     reason = "No reason provided"
