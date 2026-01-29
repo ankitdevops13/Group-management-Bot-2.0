@@ -186,6 +186,21 @@ CREATE TABLE IF NOT EXISTS abuse_warns (
 """)
 
 # ======================================================
+# ================= USER WARNINGS ======================
+# ======================================================
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS user_warnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    user_id INTEGER,
+    reason TEXT,
+    warned_by INTEGER,
+    warned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+# ======================================================
 # ================= MUTE SCHEDULER =====================
 # ======================================================
 
